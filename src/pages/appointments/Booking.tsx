@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { getStaffClient, useStaffAuth } from './auth/staffAuth';
 import type { Appointment, Doctor, DoctorSchedule, DoctorUnavailable, Patient } from '../../lib/types';
 import { generateSlots, toLocalDateKey } from '../../lib/slots';
-import { pingQueueChanged } from '../../lib/queuePing';
 
 export default function Booking() {
   const sb = getStaffClient();
@@ -131,7 +130,6 @@ export default function Booking() {
       let doneMsg = `Booked ✓ (${newId.slice(0, 8)}…).`;
       setSlotIso('');
       void loadDay();
-      pingQueueChanged(sb);
       // Free-text notes/reason go to patient_visit_notes (text column) —
       // never to a uuid column (see Bug 2 fix above).
       if (notes.trim()) {
@@ -176,7 +174,6 @@ export default function Booking() {
     }
     const { error } = await sb.from('appointments').update({ scheduled_time: slotIso, doctor_id: doctorId }).eq('id', reschedId);
     setMsg(error ? error.message : 'Rescheduled ✓ (audit logged).');
-    if (!error) pingQueueChanged(sb);
     void loadDay();
   }
 
@@ -184,7 +181,6 @@ export default function Booking() {
     if (!confirm('Cancel this appointment?')) return;
     const { error } = await sb.from('appointments').update({ status: 'cancelled' }).eq('id', id);
     setMsg(error ? error.message : 'Cancelled ✓ (audit logged).');
-    if (!error) pingQueueChanged(sb);
     void loadDay();
   }
 

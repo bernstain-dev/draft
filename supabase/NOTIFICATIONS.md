@@ -8,7 +8,7 @@ Twilio keys later to send for real without code changes.
 
 | Function | Trigger | Auth | What it does |
 |---|---|---|---|
-| `send-confirmation` | Staff app invokes after booking | Caller JWT must be `receptionist`/`doctor`/`admin` (board rejected) | Loads appointment + patient + doctor (service-role read), sends confirmation |
+| `send-confirmation` | Staff app invokes after booking | Caller JWT must be `admin` | Loads appointment + patient + doctor (service-role read), sends confirmation |
 | `send-reminders` | Cron daily 07:00 (`supabase/cron.sql`) | `x-cron-secret` or service_role (no user JWTs) | Reminds all `scheduled` appointments tomorrow |
 
 Shared stub logic lives in `supabase/functions/_shared/notify.ts`:
@@ -40,10 +40,3 @@ it (or create the 07:00 schedule in Dashboard > Edge Functions > Schedules).
    "Confirmation sent ✓" (or "logged (no provider)" when stubbed).
 2. `curl -X POST $URL/functions/v1/send-reminders -H "x-cron-secret: $CRON_SECRET"`
    → `{ ok: true, sent, stubbed, failed }`.
-3. Board sessions cannot invoke `send-confirmation` (403 `staff only`) — the
-   board app never calls it.
-
-Deferred (nice-to-have, per spec order): queue-almost-your-turn alert.
-Suggested implementation when wanted: on `waiting → in_progress` transitions,
-invoke a `send-queue-alert` function (same stub pattern) for the next 1–2
-`waiting` rows of that doctor.

@@ -1,9 +1,9 @@
 // Shared factory only — NOT a shared session.
 // Each route group creates its OWN client with its OWN storageKey so
-// staff (/appointments) and board (/queue-board) sessions never mix.
+// staff (/appointments) and patient (/patient) sessions never mix.
 // Auth logic itself lives separately in:
 //   src/pages/appointments/auth/*  (staff only)
-//   src/pages/queue-board/auth/*   (board only)
+//   src/pages/patient/auth/*       (patient only)
 // Neither folder may import from the other.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
@@ -23,4 +23,4 @@ export function createAppClient(storageKey: string): SupabaseClient {
   });
 }
 
-export type StaffRole = 'receptionist' | 'doctor' | 'admin';
+export type StaffRole = 'admin';

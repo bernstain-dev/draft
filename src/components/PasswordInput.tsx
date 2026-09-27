@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 // Reusable password field with a Show/Hide (eye) toggle.
 // Masked by default; the toggle is type="button" so it never submits forms.
-// Used by StaffLogin, BoardLogin, and Settings (change password).
+// Used by login pages and Settings (change password).
 interface PasswordInputProps {
   value: string;
   onChange: (value: string) => void;

@@ -1,4 +1,5 @@
 export type AppointmentStatus =
+  | 'pending'
   | 'scheduled'
   | 'checked_in'
   | 'waiting'
@@ -44,6 +45,8 @@ export interface Patient {
   date_of_birth?: string | null;
   contact_number?: string | null;
   address?: string | null;
+  /** Auth link (added by patient-booking migration). Null on older databases. */
+  user_id?: string | null;
 }
 
 export interface Appointment {
@@ -55,10 +58,20 @@ export interface Appointment {
   is_recurring: boolean;
   recurrence_parent_id?: string | null;
   status: AppointmentStatus;
+  /**
+   * @deprecated Queue system removed. Only present on databases created
+   * before the cleanup (retained for historical data, never used).
+   */
   queue_number?: number | null;
   room?: string | null;
-  is_priority: boolean;
+  /**
+   * Legacy triage flag (pre-cleanup databases only). Never shown
+   * in the patient portal.
+   */
+  is_priority?: boolean;
   checked_in_at?: string | null;
+  /** Reason for visit (added by patient-booking migration; nullable on older DBs). */
+  reason?: string | null;
 }
 
 export interface AppointmentJoined extends Appointment {

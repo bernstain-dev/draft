@@ -7,7 +7,6 @@ interface Row {
   id: string;
   scheduled_time: string;
   status: string;
-  queue_number: number | null;
   room: string | null;
   source: string;
   patient?: { full_name: string } | null;
@@ -51,7 +50,7 @@ export default function Dashboard() {
   useEffect(() => {
     const { startIso: s, endIso: e } = dayRangeIso(dateKey);
     sb.from('appointments')
-      .select('id,scheduled_time,status,queue_number,room,source,patient:patients(full_name),doctor:doctors(full_name)')
+      .select('id,scheduled_time,status,room,source,patient:patients(full_name),doctor:doctors(full_name)')
       .gte('scheduled_time', s)
       .lte('scheduled_time', e)
       .order('scheduled_time')
@@ -205,7 +204,6 @@ export default function Dashboard() {
                     </td>
                     <td className="dk-td">
                       {r.patient?.full_name}
-                      {r.queue_number != null && <span className="ml-2 text-xs text-slate-500">Q#{r.queue_number}</span>}
                     </td>
                     <td className="dk-td text-slate-300">{r.doctor?.full_name}</td>
                     <td className="dk-td">

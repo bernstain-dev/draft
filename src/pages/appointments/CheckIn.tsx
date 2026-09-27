@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { getStaffClient } from './auth/staffAuth';
 import type { Appointment, AppointmentStatus, Patient } from '../../lib/types';
 import { toLocalDateKey, dayRangeIso } from '../../lib/slots';
-import { pingQueueChanged } from '../../lib/queuePing';
 
 interface Row extends Appointment {
   patient?: Patient | null;
@@ -85,20 +84,9 @@ export default function CheckIn() {
     else {
       setMsg(
         status === 'checked_in'
-          ? `Checked in ✓ — queue number auto-assigned by DB trigger.`
+          ? `Checked in ✓.`
           : `Status → ${status} ✓ (audit logged).`
       );
-      void load();
-      pingQueueChanged(sb);
-    }
-  }
-
-  async function togglePriority(r: Row) {
-    const { error } = await sb.from('appointments').update({ is_priority: !r.is_priority }).eq('id', r.id);
-    if (error) setMsg(error.message);
-    else {
-      setMsg(r.is_priority ? 'Moved to regular lane.' : 'Moved to priority lane ✓');
-      pingQueueChanged(sb);
       void load();
     }
   }
@@ -125,7 +113,7 @@ export default function CheckIn() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">Check-in and queue flow</h1>
+        <h1 className="text-2xl font-bold">Check-in</h1>
         <p className="text-sm text-slate-400">{dayLabel}</p>
       </div>
       <div className="flex items-center gap-2">
@@ -151,10 +139,8 @@ export default function CheckIn() {
                 <div key={r.id} className="dk-panel space-y-2">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-semibold">
-                      {r.queue_number != null ? `Q-${String(r.queue_number).padStart(3, '0')} · ` : ''}
                       {r.patient?.full_name ?? r.patient_id.slice(0, 8)}
                     </span>
-                    {r.is_priority && <span className="dk-pill bg-amber-500/15 text-amber-400">priority</span>}
                   </div>
                   <p className="text-xs text-slate-400">
                     {new Date(r.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -189,13 +175,6 @@ export default function CheckIn() {
                           value={roomEdits[r.id] ?? r.room ?? ''}
                           onChange={(e) => setRoomEdits({ ...roomEdits, [r.id]: e.target.value })}
                         />
-                        <button
-                          className="shrink-0 rounded-lg border border-white/15 px-2 text-sm text-amber-300 hover:bg-white/5"
-                          title="Toggle priority lane on the queue board"
-                          onClick={() => void togglePriority(r)}
-                        >
-                          {r.is_priority ? '★' : '☆'}
-                        </button>
                       </div>
                       <div className="flex gap-2">
                         <input

@@ -1,17 +1,25 @@
 -- ============================================================
--- MedicalAppointment — CLEAN full schema + RLS (final, fixed).
+-- MedicalAppointment — CLEAN full schema + RLS + patient booking.
 -- Run the ENTIRE file once in Supabase SQL Editor. Safe to re-run:
 -- every statement is IF NOT EXISTS / DROP IF EXISTS / CREATE OR REPLACE.
--- Already incorporates all fixes:
---  * no (scheduled_time::date) expression index (was 42P17) — plain btree
---  * is_admin() SECURITY DEFINER — no "infinite recursion" on profiles
---  * all role checks use qualified profiles.id (was 42702 ambiguous id)
---  * queue_today view + get_queue_today() use DROP + CREATE, not OR REPLACE
---    (shape changes are rejected on replace: 42P16 / return-type change)
---  * self-healing ALTER for is_priority moved immediately after CREATE
---    TABLE appointments, before any index references it (was 42703 —
---    the ALTER previously ran too late, after idx_appts_priority)
--- After it reports success, run the realtime line in section 6 separately.
+--
+-- This is the single source of truth for FRESH installs:
+--   1. Run this file (schema + RLS + booking RPCs).
+--   2. Run `node supabase/seed.cjs` for accounts + demo data
+--      (needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in env).
+--
+-- Upgrading an EXISTING database created with the old schema?
+-- Run `supabase/migrate_patient_booking.sql` instead (it converges
+-- the old schema to this one without dropping existing data).
+--
+-- Design notes:
+--  * No Board Queuing system: no queue_number, no priority lane,
+--    no queue_today view, no get_queue_today/can_access_queue.
+--  * Roles: admin (manages everything) + patient (books own visits).
+--    Admin manages schedules; patients book ONLY their own visits.
+--  * Double-booking is blocked by unique index uq_doctor_slot.
+--  * Booking RPCs derive the patient from auth.uid() — frontend
+--    input is never trusted for identity.
 -- ============================================================
 
 -- 0) Extensions (Supabase usually has these; safe to re-run)
@@ -24,7 +32,7 @@ create extension if not exists "pgcrypto";
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
-  role text not null check (role in ('receptionist','doctor','admin','board')),
+  role text not null check (role in ('admin','patient')),
   device_label text,
   created_at timestamptz default now()
 );
@@ -58,6 +66,7 @@ create table if not exists doctor_unavailable_dates (
 
 create table if not exists patients (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references profiles(id) on delete set null, -- auth link for patient logins
   full_name text not null,
   date_of_birth date,
   contact_number text,
@@ -67,6 +76,7 @@ create table if not exists patients (
 
 create index if not exists idx_patients_name on patients (lower(full_name));
 create index if not exists idx_patients_contact on patients (contact_number);
+create unique index if not exists uq_patients_user on patients (user_id);
 
 create table if not exists appointments (
   id uuid primary key default gen_random_uuid(),
@@ -77,23 +87,20 @@ create table if not exists appointments (
   is_recurring boolean default false,
   recurrence_parent_id uuid references appointments(id) on delete set null,
   status text not null check (status in (
-    'scheduled','checked_in','waiting','in_progress',
+    'pending','scheduled','checked_in','waiting','in_progress',
     'completed','cancelled','no_show'
   )) default 'scheduled',
-  queue_number int,
   room text,
-  is_priority boolean not null default false, -- priority lane (seniors/PWD/triage)
+  reason text,
   checked_in_at timestamptz,
   created_by uuid references profiles(id) on delete set null,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
--- Self-heal for databases created before is_priority existed. MUST run
--- here, immediately after CREATE TABLE, and before ANY index below
--- references is_priority — otherwise CREATE INDEX fails with 42703 on
--- a pre-existing table that predates this column.
-alter table appointments add column if not exists is_priority boolean not null default false;
+-- Heal databases that predate the newer columns (fresh installs no-op).
+alter table patients add column if not exists user_id uuid references profiles(id) on delete set null;
+alter table appointments add column if not exists reason text;
 
 create index if not exists idx_appts_doctor_time on appointments (doctor_id, scheduled_time);
 create index if not exists idx_appts_patient on appointments (patient_id);
@@ -103,8 +110,6 @@ create index if not exists idx_appts_status on appointments (status);
 -- Postgres rejects it in index expressions (42P17). The plain btree below
 -- serves all day-range queries (gte/lte on scheduled_time).
 create index if not exists idx_appts_sched_time on appointments (scheduled_time);
-create index if not exists idx_appts_priority on appointments (is_priority)
-  where status in ('checked_in','waiting','in_progress');
 
 -- prevent double-booking: same doctor, same slot, unless cancelled/no_show
 -- NOTE: keep intact. Do not relax this predicate.
@@ -139,7 +144,7 @@ create index if not exists idx_audit_entity on audit_log (entity, entity_id);
 create index if not exists idx_audit_actor on audit_log (actor_id);
 
 -- ============================================================
--- 2) AUTOMATION: updated_at, queue_number, audit
+-- 2) AUTOMATION: updated_at + audit
 -- ============================================================
 
 create or replace function set_updated_at()
@@ -154,34 +159,6 @@ drop trigger if exists trg_appointments_updated_at on appointments;
 create trigger trg_appointments_updated_at
   before update on appointments
   for each row execute function set_updated_at();
-
--- Auto-assign queue_number on first check-in: max(queue_number)+1 for
--- today's date (local DB date = current_date). Walk-ins and pre-booked
--- share the same daily sequence, distinguished by `source`.
-create or replace function assign_queue_number()
-returns trigger as $$
-declare
-  max_q int;
-begin
-  if (new.queue_number is null
-      and old.status = 'scheduled'
-      and new.status in ('checked_in','waiting','in_progress')) then
-    select coalesce(max(queue_number), 0) into max_q
-    from appointments
-    where scheduled_time::date = (new.scheduled_time::date);
-    new.queue_number := max_q + 1;
-    if new.checked_in_at is null then
-      new.checked_in_at := now();
-    end if;
-  end if;
-  return new;
-end;
-$$ language plpgsql;
-
-drop trigger if exists trg_assign_queue_number on appointments;
-create trigger trg_assign_queue_number
-  before update on appointments
-  for each row execute function assign_queue_number();
 
 -- Audit trigger: logs status changes, reschedules, creates, cancels.
 create or replace function audit_appointment_changes()
@@ -217,39 +194,8 @@ create trigger trg_audit_appointments
   for each row execute function audit_appointment_changes();
 
 -- ============================================================
--- 3) QUEUE VIEW + BOARD-ONLY ACCESS FUNCTION
--- Board must ONLY read today's active queue. Views don't enforce RLS
--- themselves, so all board reads go through get_queue_today(), which
--- is SECURITY DEFINER + explicitly checks profiles.role = 'board'
--- (or staff, so staff can also preview the board).
+-- 3) HELPERS
 -- ============================================================
-
--- NOTE: drop + recreate (not OR REPLACE): adding is_priority in the middle
--- of the column list is a shape change Postgres rejects on replace (42P16).
-drop view if exists queue_today;
-create view queue_today as
-select
-  a.id,
-  a.queue_number,
-  a.is_priority,
-  p.full_name as patient_display_name,
-  d.full_name as doctor_name,
-  a.status,
-  a.room,
-  a.scheduled_time
-from appointments a
-join patients p on p.id = a.patient_id
-join doctors d on d.id = a.doctor_id
-where a.scheduled_time::date = current_date
-  and a.status in ('checked_in','waiting','in_progress')
-order by a.queue_number asc nulls last, a.scheduled_time asc;
-
-create or replace function can_access_queue()
-returns boolean as $$
-  select exists (
-    select 1 from profiles where profiles.id = auth.uid() and role in ('board','receptionist','doctor','admin')
-  );
-$$ language sql security definer stable;
 
 -- Admin check that never recurses: runs as the function owner (who bypasses
 -- RLS), so policies on `profiles` itself can safely call it. A policy that
@@ -262,31 +208,12 @@ returns boolean as $$
   );
 $$ language sql security definer stable;
 
--- NOTE: drop + recreate (not OR REPLACE): adding is_priority to the
--- RETURNS TABLE list changes the return type, which replace rejects.
--- (Section 5 re-applies the EXECUTE grant dropped with the function.)
-drop function if exists get_queue_today();
-create function get_queue_today()
-returns table (
-  id uuid,
-  queue_number int,
-  is_priority boolean,
-  patient_display_name text,
-  doctor_name text,
-  status text,
-  room text,
-  scheduled_time timestamptz
-) as $$
-begin
-  if not (
-    exists (select 1 from profiles where profiles.id = auth.uid() and role in ('board','receptionist','doctor','admin'))
-  ) then
-    raise exception 'not authorized for queue board' using errcode = '42501';
-  end if;
-  return query select q.id, q.queue_number, q.is_priority, q.patient_display_name, q.doctor_name, q.status, q.room, q.scheduled_time
-               from queue_today q;
-end;
-$$ language plpgsql security definer stable;
+-- Patient identity (SECURITY DEFINER so RLS on `patients` itself can
+-- never recurse through it). Returns the caller's row in `patients`.
+create or replace function my_patient_id()
+returns uuid as $$
+  select p.id from patients p where p.user_id = auth.uid() limit 1;
+$$ language sql security definer stable;
 
 -- ============================================================
 -- 4) RLS
@@ -301,7 +228,7 @@ alter table patient_visit_notes enable row level security;
 alter table appointments enable row level security;
 alter table audit_log enable row level security;
 
--- Drop old policies if re-running (names from draft spec + this file)
+-- Drop old policies if re-running (names from earlier revisions)
 drop policy if exists "staff_full_access_appointments" on appointments;
 drop policy if exists "staff_full_access_patients" on patients;
 drop policy if exists "staff_full_access_doctors" on doctors;
@@ -309,6 +236,7 @@ drop policy if exists "staff_read_own_profile" on profiles;
 drop policy if exists "staff_full_access_audit" on audit_log;
 drop policy if exists "profiles_select_own" on profiles;
 drop policy if exists "profiles_insert_own" on profiles;
+drop policy if exists "profiles_update_own" on profiles;
 drop policy if exists "profiles_admin_all" on profiles;
 drop policy if exists "staff_all_doctors" on doctors;
 drop policy if exists "staff_all_schedules" on doctor_schedules;
@@ -318,6 +246,15 @@ drop policy if exists "staff_all_notes" on patient_visit_notes;
 drop policy if exists "staff_all_appointments" on appointments;
 drop policy if exists "audit_admin_select" on audit_log;
 drop policy if exists "audit_staff_insert" on audit_log;
+drop policy if exists "patient_read_doctors" on doctors;
+drop policy if exists "patient_read_schedules" on doctor_schedules;
+drop policy if exists "patient_read_unavailable" on doctor_unavailable_dates;
+drop policy if exists "patient_select_own" on patients;
+drop policy if exists "patient_insert_own" on patients;
+drop policy if exists "patient_update_own" on patients;
+drop policy if exists "patient_select_own_appointments" on appointments;
+drop policy if exists "patient_insert_own_appointments" on appointments;
+drop policy if exists "patient_update_own_appointments" on appointments;
 
 -- ---- profiles ----
 -- Every signed-in user can read their own row (needed to resolve role).
@@ -328,76 +265,124 @@ create policy "profiles_select_own" on profiles
 create policy "profiles_insert_own" on profiles
   for insert with check (id = auth.uid());
 
--- Admins can manage all profiles (create board accounts, set roles).
+-- Every user may keep their own display name in sync.
+create policy "profiles_update_own" on profiles
+  for update using (id = auth.uid()) with check (id = auth.uid());
+
+-- Admins can manage all profiles.
 -- Uses is_admin() (SECURITY DEFINER) — a direct subquery on profiles here
 -- would recurse infinitely.
 create policy "profiles_admin_all" on profiles
   for all using (is_admin()) with check (is_admin());
 
--- ---- clinical tables: staff-only (receptionist/doctor/admin).
--- No policy grants anything to role='board', so board gets 0 rows.
+-- ---- clinical tables: admin-only ----
 create policy "staff_all_doctors" on doctors
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "staff_all_schedules" on doctor_schedules
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "staff_all_unavailable" on doctor_unavailable_dates
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "staff_all_patients" on patients
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "staff_all_notes" on patient_visit_notes
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "staff_all_appointments" on appointments
   for all using (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   ) with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
+-- ---- patient access ----
+-- Patients may read ACTIVE doctors (needed for "Choose a Doctor").
+create policy "patient_read_doctors" on doctors
+  for select using (
+    is_active = true
+    and exists (select 1 from profiles pr where pr.id = auth.uid() and pr.role = 'patient')
+  );
+
+-- Patients may read schedules / blocked dates of active doctors
+-- (needed for "Choose a Date" / "Choose an Available Time").
+create policy "patient_read_schedules" on doctor_schedules
+  for select using (
+    exists (select 1 from profiles pr where pr.id = auth.uid() and pr.role = 'patient')
+    and exists (select 1 from doctors d where d.id = doctor_schedules.doctor_id and d.is_active = true)
+  );
+
+create policy "patient_read_unavailable" on doctor_unavailable_dates
+  for select using (
+    exists (select 1 from profiles pr where pr.id = auth.uid() and pr.role = 'patient')
+    and exists (select 1 from doctors d where d.id = doctor_unavailable_dates.doctor_id and d.is_active = true)
+  );
+
+-- Patients own exactly one row in `patients` (via user_id).
+create policy "patient_select_own" on patients
+  for select using (user_id = auth.uid());
+
+create policy "patient_insert_own" on patients
+  for insert with check (user_id = auth.uid());
+
+create policy "patient_update_own" on patients
+  for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- Appointments: patients see and manage ONLY their own rows.
+-- Rows are always saved under the authenticated patient
+-- (my_patient_id()), never a frontend-supplied id.
+create policy "patient_select_own_appointments" on appointments
+  for select using (patient_id = my_patient_id());
+
+create policy "patient_insert_own_appointments" on appointments
+  for insert with check (patient_id = my_patient_id());
+
+create policy "patient_update_own_appointments" on appointments
+  for update using (patient_id = my_patient_id())
+  with check (patient_id = my_patient_id());
+
 -- ---- audit_log ----
--- Staff may INSERT via app/trigger context; only admin may read.
+-- Admin may INSERT via app/trigger context; only admin may read.
 -- (The audit trigger itself is SECURITY DEFINER so INSERTs from the
 -- trigger always succeed even if the RLS INSERT check below changes.)
 create policy "audit_staff_insert" on audit_log
   for insert with check (
     exists (select 1 from profiles pr where pr.id = auth.uid()
-            and pr.role in ('receptionist','doctor','admin'))
+            and pr.role = 'admin')
   );
 
 create policy "audit_admin_select" on audit_log
@@ -407,7 +392,197 @@ create policy "audit_admin_select" on audit_log
   );
 
 -- ============================================================
--- 5) GRANTS — least privilege
+-- 5) BOOKING RPCs (backend validation — the frontend ALSO
+--    validates, but the backend never trusts it)
+--
+-- Timezone note: doctor_schedules store LOCAL wall-clock times for the
+-- clinic (Asia/Manila). Slot validation therefore interprets the
+-- requested instant in Asia/Manila, matching the patient portal which
+-- builds slots from the same schedules.
+-- ============================================================
+
+-- Shared slot check: doctor exists+active, date valid, doctor open that
+-- day, slot fits the schedule grid, slot not already booked.
+create or replace function _assert_slot_bookable(p_doctor_id uuid, p_scheduled_time timestamptz)
+returns void as $$
+declare
+  v_local timestamp;
+  v_date date;
+  v_dow int;
+  v_min int;
+  v_ok boolean;
+begin
+  -- 1. doctor exists and is active
+  if not exists (select 1 from doctors d where d.id = p_doctor_id and d.is_active = true) then
+    raise exception 'This doctor is not available for appointments. Please choose another doctor.';
+  end if;
+
+  -- 2. date/time must be in the future
+  if p_scheduled_time <= now() then
+    raise exception 'Please choose a future date and time for your appointment.';
+  end if;
+
+  v_local := p_scheduled_time at time zone 'Asia/Manila';
+  v_date := (v_local)::date;
+  v_dow := extract(dow from v_local)::int;
+  v_min := extract(hour from v_local)::int * 60 + extract(minute from v_local)::int;
+
+  -- 3. doctor must not be blocked that date
+  if exists (select 1 from doctor_unavailable_dates u where u.doctor_id = p_doctor_id and u.date = v_date) then
+    raise exception 'This doctor is not available for appointments on the selected date. Please choose another date.';
+  end if;
+
+  -- 4. slot must sit on the doctor's schedule grid for that weekday
+  select exists (
+    select 1 from doctor_schedules s
+    where s.doctor_id = p_doctor_id
+      and s.day_of_week = v_dow
+      and v_min >= (extract(hour from s.start_time)::int * 60 + extract(minute from s.start_time)::int)
+      and v_min + s.slot_duration_minutes <= (extract(hour from s.end_time)::int * 60 + extract(minute from s.end_time)::int)
+      and mod(
+        v_min - (extract(hour from s.start_time)::int * 60 + extract(minute from s.start_time)::int),
+        s.slot_duration_minutes
+      ) = 0
+  ) into v_ok;
+  if not coalesce(v_ok, false) then
+    raise exception 'This appointment time is no longer available. Please choose another time.';
+  end if;
+
+  -- 5+6. slot must not already be booked (unique index uq_doctor_slot
+  -- backs this; the explicit check yields the friendly message).
+  if exists (
+    select 1 from appointments a
+    where a.doctor_id = p_doctor_id
+      and a.scheduled_time = p_scheduled_time
+      and a.status not in ('cancelled','no_show')
+  ) then
+    raise exception 'This appointment slot has already been booked. Please select another available time.';
+  end if;
+end;
+$$ language plpgsql security definer;
+
+-- Book under the authenticated patient.
+create or replace function book_appointment(
+  p_doctor_id uuid,
+  p_scheduled_time timestamptz,
+  p_reason text default null
+)
+returns jsonb as $$
+declare
+  v_patient uuid;
+  v_id uuid;
+begin
+  -- 7. appointment saved under the logged-in patient (never frontend input)
+  if auth.uid() is null then
+    raise exception 'You must be signed in to book an appointment.';
+  end if;
+  v_patient := my_patient_id();
+  if v_patient is null then
+    raise exception 'We couldn''t find your patient profile. Please complete your profile and try again.';
+  end if;
+
+  perform _assert_slot_bookable(p_doctor_id, p_scheduled_time);
+
+  begin
+    insert into appointments (patient_id, doctor_id, scheduled_time, source, status, reason, created_by)
+    values (v_patient, p_doctor_id, p_scheduled_time, 'pre_booked', 'scheduled', nullif(trim(coalesce(p_reason, '')), ''), auth.uid())
+    returning id into v_id;
+  exception when unique_violation then
+    raise exception 'This appointment slot has already been booked. Please select another available time.';
+  end;
+
+  return jsonb_build_object(
+    'success', true,
+    'id', v_id,
+    'message', 'Your appointment has been booked successfully.'
+  );
+end;
+$$ language plpgsql security definer;
+
+-- Reschedule an OWN appointment to a new validated slot.
+create or replace function reschedule_appointment(
+  p_appointment_id uuid,
+  p_doctor_id uuid,
+  p_scheduled_time timestamptz
+)
+returns jsonb as $$
+declare
+  v_patient uuid;
+  v_owner uuid;
+  v_status text;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to reschedule an appointment.';
+  end if;
+  v_patient := my_patient_id();
+  if v_patient is null then
+    raise exception 'We couldn''t find your patient profile. Please complete your profile and try again.';
+  end if;
+
+  select patient_id, status into v_owner, v_status
+  from appointments where id = p_appointment_id;
+  if not found or v_owner is distinct from v_patient then
+    raise exception 'Appointment not found.';
+  end if;
+  if v_status not in ('pending','scheduled') then
+    raise exception 'Only upcoming appointments can be rescheduled.';
+  end if;
+
+  perform _assert_slot_bookable(p_doctor_id, p_scheduled_time);
+
+  begin
+    update appointments
+    set doctor_id = p_doctor_id, scheduled_time = p_scheduled_time
+    where id = p_appointment_id;
+  exception when unique_violation then
+    raise exception 'This appointment slot has already been booked. Please select another available time.';
+  end;
+
+  return jsonb_build_object(
+    'success', true,
+    'id', p_appointment_id,
+    'message', 'Your appointment has been rescheduled successfully.'
+  );
+end;
+$$ language plpgsql security definer;
+
+-- Cancel an OWN upcoming appointment.
+create or replace function cancel_appointment(p_appointment_id uuid)
+returns jsonb as $$
+declare
+  v_patient uuid;
+  v_owner uuid;
+  v_status text;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to manage your appointments.';
+  end if;
+  v_patient := my_patient_id();
+  if v_patient is null then
+    raise exception 'We couldn''t find your patient profile. Please complete your profile and try again.';
+  end if;
+
+  select patient_id, status into v_owner, v_status
+  from appointments where id = p_appointment_id;
+  if not found or v_owner is distinct from v_patient then
+    raise exception 'Appointment not found.';
+  end if;
+  if v_status in ('completed','cancelled','no_show') then
+    raise exception 'This appointment can no longer be cancelled.';
+  end if;
+
+  update appointments set status = 'cancelled' where id = p_appointment_id;
+
+  return jsonb_build_object(
+    'success', true,
+    'id', p_appointment_id,
+    'message', 'Your appointment has been cancelled.'
+  );
+end;
+$$ language plpgsql security definer;
+
+-- ============================================================
+-- 6) GRANTS — least privilege
 -- ============================================================
 
 revoke all on table profiles, doctors, doctor_schedules,
@@ -416,22 +591,10 @@ revoke all on table profiles, doctors, doctor_schedules,
 grant all on table profiles, doctors, doctor_schedules,
   doctor_unavailable_dates, patients, patient_visit_notes,
   appointments, audit_log to authenticated;
--- RLS above is what actually restricts rows; board has no policy
--- on base tables so it sees nothing there.
+-- RLS above is what actually restricts rows.
 
-revoke all on table queue_today from anon, authenticated;
-grant select on queue_today to authenticated; -- view itself inert without base perms;
-                                             -- real gate is get_queue_today()
-
-grant execute on function can_access_queue() to authenticated;
-grant execute on function get_queue_today() to authenticated;
 grant execute on function is_admin() to authenticated;
-
--- ============================================================
--- 6) REALTIME — board subscribes to appointment changes
--- Run this too (needed once per project):
--- ============================================================
--- NOTE: Supabase realtime publication. Uncomment/run if the table is
--- not already in the publication (re-running is safe to attempt, will
--- error gracefully if already a member — ignore that error).
--- alter publication supabase_realtime add table appointments;
+grant execute on function my_patient_id() to authenticated;
+grant execute on function book_appointment(uuid, timestamptz, text) to authenticated;
+grant execute on function reschedule_appointment(uuid, uuid, timestamptz) to authenticated;
+grant execute on function cancel_appointment(uuid) to authenticated;

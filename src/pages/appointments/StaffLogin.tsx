@@ -26,18 +26,18 @@ export default function StaffLogin() {
   return (
     <LoginShell
       brand="RHU PORTAL"
-      portalTag="STAFF"
-      title="Clinic Staff Portal"
+      portalTag="ADMIN"
+      title="Clinic Admin Portal"
       features={[
         'Appointment Scheduling',
-        'Live Queue Board',
         'Patient Records',
         'Doctor Management',
         'Reports & Analytics',
+        'Check-in',
       ]}
       tabs={[
-        { label: 'Staff Login', to: '/appointments/login', active: true },
-        { label: 'Board Login', to: '/queue-board/login', active: false },
+        { label: 'Admin Login', to: '/appointments/login', active: true },
+        { label: 'Patient Login', to: '/patient/login', active: false },
       ]}
     >
       <form onSubmit={onSubmit} className="space-y-3">

@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useStaffAuth } from './auth/staffAuth';
+import { usePatientAuth } from './auth/patientAuth';
 
-// Guard logic unchanged: loading gate + role gate, then sidebar shell.
 const NAV = [
-  { to: '/appointments/dashboard', label: 'Dashboard', icon: '▦' },
-  { to: '/appointments/booking', label: 'Booking', icon: '◫' },
-  { to: '/appointments/check-in', label: 'Check-in', icon: '✓' },
-  { to: '/appointments/patients', label: 'Patients', icon: '○' },
-  { to: '/appointments/doctors', label: 'Doctors', icon: '✚' },
-  { to: '/appointments/reports', label: 'Reports', icon: '▥' },
-  { to: '/appointments/settings', label: 'Settings', icon: '⚙' },
+  { to: '/patient/dashboard', label: 'Dashboard', icon: '▦' },
+  { to: '/patient/book', label: 'Book an Appointment', icon: '◫' },
+  { to: '/patient/appointments', label: 'My Appointments', icon: '✓' },
+  { to: '/patient/history', label: 'Appointment History', icon: '▥' },
+  { to: '/patient/profile', label: 'Profile', icon: '○' },
+  { to: '/patient/settings', label: 'Settings', icon: '⚙' },
 ];
 
-const COLLAPSE_KEY = 'staff-sidebar-collapsed';
+const COLLAPSE_KEY = 'patient-sidebar-collapsed';
 
 function HamburgerIcon() {
   return (
@@ -23,10 +21,9 @@ function HamburgerIcon() {
   );
 }
 
-export default function StaffLayout() {
-  const { user, profile, role, loading, signOut } = useStaffAuth();
+export default function PatientLayout() {
+  const { user, profile, loading, signOut } = usePatientAuth();
   const loc = useLocation();
-  // Desktop: expanded (icon + text) vs collapsed (icon only). Persisted.
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === '1';
@@ -34,7 +31,6 @@ export default function StaffLayout() {
       return false;
     }
   });
-  // Mobile: sidebar behaves as an overlay drawer, closed by default.
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -45,12 +41,10 @@ export default function StaffLayout() {
     }
   }, [collapsed]);
 
-  // Close the mobile drawer whenever the route changes.
   useEffect(() => {
     setMobileOpen(false);
   }, [loc.pathname]);
 
-  // Lock body scroll while the mobile drawer is open.
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : '';
     return () => {
@@ -59,7 +53,7 @@ export default function StaffLayout() {
   }, [mobileOpen]);
 
   if (loading) return <p className="staff-dark p-8 text-center text-sm">Loading session…</p>;
-  if (!user || !profile || !role) return <Navigate to="/appointments/login" replace />;
+  if (!user || !profile) return <Navigate to="/patient/login" replace />;
 
   const activePage = NAV.find((n) => loc.pathname.startsWith(n.to))?.label ?? '';
 
@@ -89,33 +83,27 @@ export default function StaffLayout() {
   );
 
   return (
-    // Fixed viewport-height shell: the page itself never scrolls. The sidebar
-    // stays pinned at full height while <main> below owns the only scroll
-    // container. dvh (with vh fallback) keeps mobile browser chrome correct.
     <div className="staff-dark flex h-screen overflow-hidden supports-[height:100dvh]:h-[100dvh]">
-      {/* Mobile top bar with hamburger (drawer trigger) */}
       <header className="fixed inset-x-0 top-0 z-30 flex items-center gap-2 border-b border-white/5 bg-black/70 px-3 py-2 backdrop-blur md:hidden">
         <button
           type="button"
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation menu"
           aria-expanded={mobileOpen}
-          aria-controls="staff-mobile-nav"
+          aria-controls="patient-mobile-nav"
           className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-200 hover:bg-white/10 hover:text-white"
         >
           <HamburgerIcon />
         </button>
         <span className="flex h-6 w-6 items-center justify-center rounded bg-[#0e4a3a] text-xs font-bold text-white">✚</span>
-        <span className="text-sm font-bold">Clinic admin</span>
+        <span className="text-sm font-bold">My Health</span>
         {activePage && <span className="ml-1 text-xs text-slate-400">· {activePage}</span>}
       </header>
 
-      {/* Desktop sidebar: pinned full-height, never scrolls with content.
-          Expanded (icon + text) / collapsed (icon only). */}
       <aside
-        id="staff-sidebar"
+        id="patient-sidebar"
         className={`hidden h-full shrink-0 flex-col border-r border-white/5 bg-black/50 p-3 transition-[width] duration-200 ease-in-out md:flex ${
-          collapsed ? 'md:w-[76px]' : 'md:w-52 md:p-4'
+          collapsed ? 'md:w-[76px]' : 'md:w-60 md:p-4'
         }`}
       >
         <div className={`flex items-center gap-2 px-1 py-2 ${collapsed ? 'flex-col' : ''}`}>
@@ -124,14 +112,14 @@ export default function StaffLayout() {
             onClick={() => setCollapsed((c) => !c)}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            aria-controls="staff-sidebar"
+            aria-controls="patient-sidebar"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
           >
             <HamburgerIcon />
           </button>
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#0e4a3a] text-xs font-bold text-white">✚</span>
-          {!collapsed && <span className="truncate text-sm font-bold">Clinic admin</span>}
+          {!collapsed && <span className="truncate text-sm font-bold">My Health</span>}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">{renderLinks(!collapsed)}</div>
@@ -139,7 +127,7 @@ export default function StaffLayout() {
         <div className="mt-auto space-y-1 pt-4">
           {collapsed ? (
             <div
-              title={`${profile.full_name} · ${role}`}
+              title={profile.full_name}
               className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#0e4a3a]/40 text-xs font-bold text-[#9fd8cb]"
             >
               {(profile.full_name.trim()[0] ?? '?').toUpperCase()}
@@ -147,7 +135,7 @@ export default function StaffLayout() {
           ) : (
             <div className="rounded-lg bg-white/5 px-3 py-2">
               <p className="truncate text-xs font-semibold">{profile.full_name}</p>
-              <p className="text-[11px] uppercase tracking-wider text-[#4ea895]">{role}</p>
+              <p className="text-[11px] uppercase tracking-wider text-[#4ea895]">Patient</p>
             </div>
           )}
           <button
@@ -165,7 +153,6 @@ export default function StaffLayout() {
         </div>
       </aside>
 
-      {/* Mobile drawer backdrop */}
       {mobileOpen && (
         <button
           type="button"
@@ -175,9 +162,8 @@ export default function StaffLayout() {
         />
       )}
 
-      {/* Mobile drawer: full labels, slides in as an overlay */}
       <aside
-        id="staff-mobile-nav"
+        id="patient-mobile-nav"
         aria-hidden={!mobileOpen}
         className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/5 bg-[#0b1210] p-4 transition-transform duration-200 ease-in-out md:hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
@@ -185,7 +171,7 @@ export default function StaffLayout() {
       >
         <div className="flex items-center gap-2 px-1 py-2">
           <span className="flex h-6 w-6 items-center justify-center rounded bg-[#0e4a3a] text-xs font-bold text-white">✚</span>
-          <span className="text-sm font-bold">Clinic admin</span>
+          <span className="text-sm font-bold">My Health</span>
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
@@ -203,7 +189,7 @@ export default function StaffLayout() {
         <div className="mt-auto space-y-1 pt-4">
           <div className="rounded-lg bg-white/5 px-3 py-2">
             <p className="truncate text-xs font-semibold">{profile.full_name}</p>
-            <p className="text-[11px] uppercase tracking-wider text-[#4ea895]">{role}</p>
+            <p className="text-[11px] uppercase tracking-wider text-[#4ea895]">Patient</p>
           </div>
           <button
             className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200"
@@ -218,7 +204,6 @@ export default function StaffLayout() {
         </div>
       </aside>
 
-      {/* Main content owns the only scroll container — sidebar stays put. */}
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 pt-16 md:p-6 md:pt-6">
         <div className="mx-auto w-full max-w-6xl">
           <Outlet />

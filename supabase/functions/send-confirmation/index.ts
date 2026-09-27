@@ -1,7 +1,7 @@
 // send-confirmation — POST { "appointment_id": "<uuid>" }
-// Called by staff app right after booking (best-effort; booking succeeds
-// even if this fails). Requires the caller's JWT: only staff roles
-// (receptionist/doctor/admin) are accepted; board JWTs are rejected.
+// Called by the admin app right after booking (best-effort; booking succeeds
+// even if this fails). Requires the caller's JWT: only the admin role is
+// accepted (logins are admin + patient).
 // Deploy: supabase functions deploy send-confirmation
 // Secrets: supabase secrets set RESEND_API_KEY=... NOTIFY_FROM_EMAIL=... [TWILIO_*=...]
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
@@ -22,8 +22,8 @@ Deno.serve(async (req: Request) => {
   if (!user) return json({ error: 'invalid session' }, 401);
   const { data: profile } = await userClient.from('profiles').select('role').eq('id', user.id).single();
   const role = (profile as { role?: string } | null)?.role;
-  if (!['receptionist', 'doctor', 'admin'].includes(role ?? '')) {
-    return json({ error: 'staff only' }, 403);
+  if (role !== 'admin') {
+    return json({ error: 'admin only' }, 403);
   }
 
   let body: { appointment_id?: string };

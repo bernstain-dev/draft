@@ -1,12 +1,17 @@
 # MedicAppointment
 
-Clinic staff portal + live queue-board kiosk for a Rural Health Unit (RHU).
-Staff manage appointments, check-ins, patients, doctors, and reports.
-A separate kiosk display shows the live queue (priority + regular lanes).
+Patient appointment booking + clinic staff portal for a Rural Health Unit (RHU).
+Patients choose a doctor, pick an available date and time, and manage their
+own visits. Staff manage appointments, check-ins, patients, doctors, and reports.
 
 > Full local setup: see **[setup.md](./setup.md)**.
 
 ## Features
+
+**Patient portal** (`/patient/*`)
+- Book an Appointment: choose a doctor → available date → available time → review → confirm
+- My Appointments (view / reschedule / cancel), Appointment History, Profile, Settings
+- Patient-friendly language throughout — no queue numbers or queue statuses
 
 **Staff portal** (`/appointments/*`)
 - Dashboard, appointment booking with slot picker, check-in / status flow
@@ -14,13 +19,10 @@ A separate kiosk display shows the live queue (priority + regular lanes).
 - Dark / light theme (persisted, follows OS on first visit)
 - Responsive login with DOH emblem watermark that never crops or stretches
 
-**Queue board kiosk** (`/queue-board/*`)
-- Now-serving hero, priority lane + regular lane, live clock
-- Realtime updates with polling + safety-net fallback and freshness footer
-- Kiosk-only session, fully isolated from staff auth
-
 **Platform**
-- Role-based access (RLS): `receptionist` / `doctor` / `admin` (staff), `board` (kiosk)
+- Role-based access (RLS): `admin` manages everything, `patient` books own visits
+- Backend booking validation (`book_appointment` / `reschedule_appointment` /
+  `cancel_appointment` RPCs) + double-booking blocked by unique index
 - Booking confirmation + daily reminder Edge Functions
   (provider-agnostic stubs — log only until Resend/Twilio keys are added).
   Details: `supabase/NOTIFICATIONS.md`
@@ -38,14 +40,14 @@ A separate kiosk display shows the live queue (priority + regular lanes).
 
 | Path | Who | What |
 |---|---|---|
-| `/` | — | Redirects to `/appointments/login` |
-| `/appointments/login` | Staff | Staff sign-in |
-| `/appointments/dashboard` … `/booking`, `/check-in`, `/patients`, `/doctors`, `/reports`, `/settings` | `receptionist` / `doctor` / `admin` | Staff workspace |
-| `/queue-board/login` | Kiosk | Board sign-in |
-| `/queue-board/display` | `board` | Live lobby display |
+| `/` | — | Redirects to `/patient/login` |
+| `/patient/login` | Patient | Patient sign-in / sign-up |
+| `/patient/dashboard`, `/book`, `/appointments`, `/history`, `/profile`, `/settings` | `patient` | Patient workspace |
+| `/appointments/login` | Admin | Admin sign-in |
+| `/appointments/dashboard` … `/booking`, `/check-in`, `/patients`, `/doctors`, `/reports`, `/settings` | `admin` | Staff workspace |
 
-Staff and board sessions are isolated (separate Supabase clients / storage keys) —
-a staff login never leaks into the kiosk and vice versa.
+Staff and patient sessions are isolated (separate Supabase clients / storage keys) —
+a staff login never leaks into the patient portal and vice versa.
 
 ## Quickstart
 
@@ -89,32 +91,30 @@ See `.env.example`. Never commit `.env` (already git-ignored).
 │   ├── background.jpg        # DOH emblem (login watermark, contained — never cover)
 │   └── rhu.jpg               # RHU logo / favicon
 ├── src/
-│   ├── App.tsx               # route groups: /appointments/*, /queue-board/*
+│   ├── App.tsx               # route groups: /patient/*, /appointments/*
 │   ├── main.tsx
 │   ├── index.css             # Tailwind + responsive login-background system
 │   ├── components/LoginShell.tsx
-│   ├── lib/                  # theme, supabase client factory, slots, types
+│   ├── lib/                  # theme, supabase client factory, slots, types, patient helpers
 │   └── pages/
-│       ├── appointments/     # staff portal + auth/
-│       └── queue-board/      # kiosk display + auth/
+│       ├── patient/          # patient portal + auth/
+│       └── appointments/     # staff portal + auth/
 ├── supabase/
-│   ├── schema.sql            # full schema + RLS (run once, re-runnable)
-│   ├── seedusers.sql / seed.cjs
-│   ├── seed_admin.sql / create_admin.cjs   # admin bootstrap guide
+│   ├── schema.sql            # full schema + RLS + booking RPCs (run once, re-runnable)
+│   ├── migrate_patient_booking.sql  # upgrade path for pre-cleanup databases only
+│   ├── seed.cjs              # THE seeder: accounts + demo data (service_role)
 │   ├── cron.sql / rls_tests.sql
 │   └── functions/            # send-confirmation, send-reminders, _shared/notify
-└── scripts/verify_stage6.mjs
+└── scripts/verify.mjs   # static + live checks (queue-free, patient booking)
 ```
 
 ## Database & auth (summary)
 
-1. Run `supabase/schema.sql` once in the Supabase SQL Editor (plus the
-   realtime line in section 6).
-2. Optionally run `supabase/seedusers.sql` for demo doctors / schedules /
-   patients / appointments.
-3. Create users via **Authentication > Users**, then link `profiles` rows
-   with roles — walkthrough in `supabase/seed_admin.sql`.
-4. Default bootstrap admin: `vacunawa@rhu.com.ph` / `admin123`
-   (create it manually — passwords can't be inserted via SQL).
+1. Run `supabase/schema.sql` once in the Supabase SQL Editor.
+2. Run `node supabase/seed.cjs` (needs `SUPABASE_URL` +
+   `SUPABASE_SERVICE_ROLE_KEY` in env) — creates logins and demo data.
+3. Sign in: patient `patient@rhu.com.ph` / `patient123`,
+   staff `vacunawa@rhu.com.ph` / `admin123`
+   (passwords can't be inserted via SQL — the seeder creates them via API).
 
 Full steps: **[setup.md](./setup.md)**.

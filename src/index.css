@@ -67,7 +67,7 @@ body {
 }
 
 /* Light mode: ThemeProvider sets <html data-theme="light">. Only staff
-   surfaces flip (they live under .staff-dark); board kiosk stays dark. */
+   and patient surfaces flip (they live under .staff-dark). */
 [data-theme='light'] .staff-dark {
   @apply bg-[#dde7da] text-[#122e1e];
 }

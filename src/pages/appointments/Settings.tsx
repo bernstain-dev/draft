@@ -4,7 +4,7 @@ import { useTheme } from '../../lib/theme';
 import PasswordInput from '../../components/PasswordInput';
 import type { Profile } from '../../lib/types';
 
-const ROLES = ['admin', 'receptionist', 'doctor', 'board'];
+const ROLES = ['admin', 'patient'];
 
 export default function Settings() {
   const sb = getStaffClient();
@@ -172,7 +172,7 @@ export default function Settings() {
           <h2 className="font-semibold">User roles (admin)</h2>
           <p className="mt-1 text-xs text-slate-500">
             New logins are created via Supabase Auth or seed.cjs — role changes happen here.
-            Kiosk accounts need role <span className="font-semibold">board</span>.
+            Patient accounts use role <span className="font-semibold">patient</span>.
           </p>
           <div className="mt-2 divide-y divide-white/5">
             {users.map((u) => (

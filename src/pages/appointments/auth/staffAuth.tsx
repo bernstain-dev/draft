@@ -1,6 +1,7 @@
-// STAFF-ONLY auth. Do not import anything from ../queue-board or
-// src/pages/queue-board. Separate Supabase client + storage key so the
-// board session can never leak in here.
+// STAFF-ONLY auth (admin role only — logins are admin + patient).
+// Do not import anything from ../../patient.
+// Separate Supabase client + storage key so the
+// patient session can never leak in here.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 import { createAppClient, type StaffRole } from '../../../lib/supabaseClient';
@@ -55,11 +56,11 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     const uid = data.user?.id;
     if (!uid) return 'Login failed.';
     const prof = await loadProfile(uid);
-    if (!prof || !['receptionist', 'doctor', 'admin'].includes(prof.role)) {
+    if (!prof || prof.role !== 'admin') {
       await staffSupabase.auth.signOut();
       setUser(null);
       setProfile(null);
-      return 'This account is not staff (or has no profile). Use the queue-board login for kiosks.';
+      return 'This account is not an admin account. Patients must use /patient/login.';
     }
     setUser(data.user);
     setProfile(prof);

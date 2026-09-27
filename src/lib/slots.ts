@@ -1,5 +1,4 @@
-// Pure slot computation — no auth, safe to share between staff pages.
-// (Board never imports this; it only reads get_queue_today().)
+// Pure slot computation — no auth, safe to share between staff and patient pages.
 import type { Appointment, DoctorSchedule, DoctorUnavailable } from './types';
 
 export function toLocalDateKey(d: Date): string {
