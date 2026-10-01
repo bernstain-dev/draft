@@ -8,7 +8,7 @@ import PasswordInput from '../../components/PasswordInput';
 export default function StaffLogin() {
   const { signIn } = useStaffAuth();
   const nav = useNavigate();
-  const [email, setEmail] = useState('vacunawa@rhu.com.ph');
+  const [email, setEmail] = useState('vacunawa@gmail.com');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

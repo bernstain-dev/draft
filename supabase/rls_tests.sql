@@ -31,7 +31,7 @@ from (
 -- select * from doctors limit 1;         -- OK
 -- select * from doctor_schedules limit 1;-- OK
 
--- 2) PATIENT isolation. Run as patient@rhu.com.ph (Maria Santos):
+-- 2) PATIENT isolation. Run as patient@gmail.com (Maria Santos):
 -- select * from patients;
 -- EXPECTED: exactly 1 row — Maria Santos (own row via user_id only)
 
@@ -70,7 +70,7 @@ from (
 -- update appointments set status='cancelled' where id='<FIRST_ID>';
 -- -- identical insert again -> MUST SUCCEED
 
--- 4) BOOKING RPCs (run as patient@rhu.com.ph):
+-- 4) BOOKING RPCs (run as patient@gmail.com):
 -- select book_appointment('<ACTIVE_DOCTOR_UUID>', now() + interval '2 days', 'checkup');
 -- EXPECTED: {"success": true, ...} ONLY if that instant lands on the
 -- doctor's schedule grid — otherwise a friendly exception

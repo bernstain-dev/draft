@@ -43,13 +43,15 @@ VITE_NOTIFY_ENABLED=false
 ## 3. Database — schema
 
 1. Open your Supabase project → **SQL Editor**.
-2. Paste the entire `supabase/schema.sql` and run it.
+2. Paste the entire `supabase/full.sql` and run it (one-click: schema +
+   demo data; use `supabase/schema.sql` instead for schema only).
    - Safe to re-run (all statements are `IF NOT EXISTS` / `DROP IF EXISTS` /
-     `CREATE OR REPLACE`).
+     `CREATE OR REPLACE` / `ON CONFLICT DO NOTHING`).
    - This creates tables, indexes (incl. double-booking guard
      `uq_doctor_slot`), RLS policies (staff + patient), and the booking
      RPCs (`book_appointment` / `reschedule_appointment` /
-     `cancel_appointment`).
+     `cancel_appointment`), plus 10 doctors with Mon–Sun schedules,
+     10 patients, and demo appointments.
 3. Upgrading a database created with the old (pre-cleanup) schema?
    Run `supabase/migrate_patient_booking.sql` instead — fresh installs
    don't need it.
@@ -70,11 +72,12 @@ It creates (idempotent — safe to re-run):
 
 | Email | Password | Role | Portal |
 |---|---|---|---|
-| `vacunawa@rhu.com.ph` | `admin123` | `admin` | `/appointments/login` |
-| `patient@rhu.com.ph` | `patient123` | `patient` | `/patient/login` |
+| `vacunawa@gmail.com` | `admin123` | `admin` | `/appointments/login` |
+| `patient@gmail.com` | `patient123` | `patient` | `/patient/login` |
 
-plus demo data: 4 doctors (General medicine, Pediatrics, OB-Gyne,
-Dentistry) with Mon–Fri schedules, one blocked date, 10 patients, and
+plus demo data: 10 doctors (General Medicine, Pediatrics, OB-Gyne,
+Dentistry, Cardiology, Dermatology, Ophthalmology, ENT, Orthopedics,
+Internal Medicine) with Mon–Sun 08:00–17:00 schedules, 10 patients, and
 appointments across yesterday / today / tomorrow / next week covering
 every status — so staff Dashboard, Booking, Check-in, Patients, Doctors,
 Reports, and the patient portal (Dashboard / Book an Appointment /
@@ -87,7 +90,7 @@ account is linked to "Maria Santos", who already has upcoming visits.
 > Authentication → Users in the Dashboard (patients can also
 > self-sign-up at `/patient/login` → Create account).
 
-The staff login form pre-fills `vacunawa@rhu.com.ph` for convenience.
+The staff login form pre-fills `vacunawa@gmail.com` for convenience.
 
 ## 5. Run the app
 
@@ -99,8 +102,8 @@ Open **http://localhost:5173** (Vite default for this project: port `5173`).
 
 | URL | Login | Result |
 |---|---|---|
-| `/patient/login` | `patient@rhu.com.ph` / `patient123` | Patient portal (`/patient/dashboard` …) |
-| `/appointments/login` | `vacunawa@rhu.com.ph` / `admin123` | Staff workspace (`/appointments/dashboard` …) |
+| `/patient/login` | `patient@gmail.com` / `patient123` | Patient portal (`/patient/dashboard` …) |
+| `/appointments/login` | `vacunawa@gmail.com` / `admin123` | Staff workspace (`/appointments/dashboard` …) |
 
 ## 6. Build / preview
 

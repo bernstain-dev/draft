@@ -1,22 +1,3 @@
-// THE one seeder for MedicalAppointment — accounts + demo data.
-// Run AFTER supabase/schema.sql:
-//   node supabase/seed.cjs
-// Requires env (service key via environment only, never .env):
-//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-//   (+ SUPABASE_ANON_KEY for the login smoke test)
-// Idempotent — safe to re-run (find-or-create users, upserts by id).
-//
-// What it creates:
-//   1) Auth accounts (logins are admin + patient only): admin and
-//      patient — each with its profiles row. The patient demo account
-//      (patient@rhu.com.ph) is linked to the "Maria Santos" patient
-//      record, so patient login shows appointments immediately.
-//   2) Demo directory data: 4 doctors + Mon–Fri schedules, one blocked
-//      date, 10 patients, appointments spanning yesterday / today /
-//      tomorrow / next week covering every status, and one visit note —
-//      so Dashboard, Booking, Check-in, Patients, Doctors, Reports and
-//      the patient portal (Dashboard / Book / My Appointments / History)
-//      all render immediately.
 const { createClient } = require('@supabase/supabase-js');
 
 const url = process.env.SUPABASE_URL;
@@ -27,8 +8,8 @@ if (!url || !serviceKey) {
 }
 
 const ACCOUNTS = [
-  { email: 'vacunawa@rhu.com.ph', password: 'admin123', full_name: 'RHU Admin', role: 'admin', login: '/appointments/login' },
-  { email: 'patient@rhu.com.ph', password: 'patient123', full_name: 'Maria Santos', role: 'patient', login: '/patient/login' },
+  { email: 'vacunawa@gmail.com', password: 'admin123', full_name: 'RHU Admin', role: 'admin', login: '/appointments/login' },
+  { email: 'patient@gmail.com', password: 'patient123', full_name: 'Maria Santos', role: 'patient', login: '/patient/login' },
 ];
 
 // Fixed UUIDs keep re-runs stable (upsert on id).
@@ -37,6 +18,12 @@ const D = {
   santos: 'a0000000-0000-0000-0000-000000000002',
   cruz: 'a0000000-0000-0000-0000-000000000003',
   bautista: 'a0000000-0000-0000-0000-000000000004',
+  ramirez: 'a0000000-0000-0000-0000-000000000005',
+  lim: 'a0000000-0000-0000-0000-000000000006',
+  mendoza: 'a0000000-0000-0000-0000-000000000007',
+  torres: 'a0000000-0000-0000-0000-000000000008',
+  villanueva: 'a0000000-0000-0000-0000-000000000009',
+  garcia: 'a0000000-0000-0000-0000-000000000010',
 };
 const P = {
   juan: 'b0000000-0000-0000-0000-000000000001',
@@ -111,23 +98,26 @@ function ts(offsetDays, hhmm) {
     { id: D.santos, profile_id: null, full_name: 'Dr. Mark Santos', specialty: 'Pediatrics', is_active: true },
     { id: D.cruz, profile_id: null, full_name: 'Dr. Liza Cruz', specialty: 'OB-Gyne', is_active: true },
     { id: D.bautista, profile_id: null, full_name: 'Dr. Paolo Bautista', specialty: 'Dentistry', is_active: true },
+    { id: D.ramirez, profile_id: null, full_name: 'Dr. Jose Ramirez', specialty: 'Cardiology', is_active: true },
+    { id: D.lim, profile_id: null, full_name: 'Dr. Kevin Lim', specialty: 'Dermatology', is_active: true },
+    { id: D.mendoza, profile_id: null, full_name: 'Dra. Sofia Mendoza', specialty: 'Ophthalmology', is_active: true },
+    { id: D.torres, profile_id: null, full_name: 'Dr. Daniel Torres', specialty: 'ENT', is_active: true },
+    { id: D.villanueva, profile_id: null, full_name: 'Dra. Patricia Villanueva', specialty: 'Orthopedics', is_active: true },
+    { id: D.garcia, profile_id: null, full_name: 'Dr. Robert Garcia', specialty: 'Internal Medicine', is_active: true },
   ], 'doctors');
 
-  // ---- 2b) schedules (Mon–Fri 08:00–17:00 x30m; Bautista Mon/Thu afternoons) ----
+  // ---- 2b) schedules (Mon–Sun 08:00–17:00 x30m for EVERY doctor,
+  //      so every future date always has bookable slots) ----
   let n = 101;
   const sched = (doctor_id, dow, start, end) => ({ id: `c0000000-0000-0000-0000-000000000${n++}`, doctor_id, day_of_week: dow, start_time: start, end_time: end, slot_duration_minutes: 30 });
-  await upsert('doctor_schedules', [
-    sched(D.reyes, 1, '08:00', '17:00'), sched(D.reyes, 2, '08:00', '17:00'), sched(D.reyes, 3, '08:00', '17:00'),
-    sched(D.reyes, 4, '08:00', '17:00'), sched(D.reyes, 5, '08:00', '17:00'),
-    sched(D.santos, 1, '08:00', '17:00'), sched(D.santos, 3, '08:00', '17:00'), sched(D.santos, 5, '08:00', '17:00'),
-    sched(D.cruz, 2, '08:00', '17:00'), sched(D.cruz, 4, '08:00', '17:00'),
-    sched(D.bautista, 1, '13:00', '17:00'), sched(D.bautista, 4, '13:00', '17:00'),
-  ], 'doctor_schedules');
+  const WEEK = [1, 2, 3, 4, 5, 6, 0]; // Mon..Sun
+  const schedRows = [];
+  for (const docId of Object.values(D)) {
+    for (const dow of WEEK) schedRows.push(sched(docId, dow, '08:00', '17:00'));
+  }
+  await upsert('doctor_schedules', schedRows, 'doctor_schedules');
 
-  // ---- 2c) one blocked date (seminar) ----
-  await upsert('doctor_unavailable_dates', [
-    { id: 'd0000000-0000-0000-0000-000000000001', doctor_id: D.santos, date: dateKey(2), reason: 'Seminar' },
-  ], 'doctor_unavailable_dates');
+  // ---- 2c) no blocked dates (every slot stays available) ----
 
   // ---- 2d) patients (Maria Santos linked to the patient demo login) ----
   const pat = (id, full_name, date_of_birth, contact_number, address, user_id = null) => (

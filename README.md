@@ -101,6 +101,7 @@ See `.env.example`. Never commit `.env` (already git-ignored).
 │       └── appointments/     # staff portal + auth/
 ├── supabase/
 │   ├── schema.sql            # full schema + RLS + booking RPCs (run once, re-runnable)
+│   ├── full.sql              # ONE-CLICK: schema + RLS + RPCs + demo data (run once instead of schema.sql)
 │   ├── migrate_patient_booking.sql  # upgrade path for pre-cleanup databases only
 │   ├── seed.cjs              # THE seeder: accounts + demo data (service_role)
 │   ├── cron.sql / rls_tests.sql
@@ -110,11 +111,12 @@ See `.env.example`. Never commit `.env` (already git-ignored).
 
 ## Database & auth (summary)
 
-1. Run `supabase/schema.sql` once in the Supabase SQL Editor.
+1. Run `supabase/full.sql` once in the Supabase SQL Editor
+   (one-click: schema + demo data; or `schema.sql` for schema only).
 2. Run `node supabase/seed.cjs` (needs `SUPABASE_URL` +
    `SUPABASE_SERVICE_ROLE_KEY` in env) — creates logins and demo data.
-3. Sign in: patient `patient@rhu.com.ph` / `patient123`,
-   staff `vacunawa@rhu.com.ph` / `admin123`
+3. Sign in: patient `patient@gmail.com` / `patient123`,
+   staff `vacunawa@gmail.com` / `admin123`
    (passwords can't be inserted via SQL — the seeder creates them via API).
 
 Full steps: **[setup.md](./setup.md)**.

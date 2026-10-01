@@ -58,17 +58,7 @@ export interface Appointment {
   is_recurring: boolean;
   recurrence_parent_id?: string | null;
   status: AppointmentStatus;
-  /**
-   * @deprecated Queue system removed. Only present on databases created
-   * before the cleanup (retained for historical data, never used).
-   */
-  queue_number?: number | null;
   room?: string | null;
-  /**
-   * Legacy triage flag (pre-cleanup databases only). Never shown
-   * in the patient portal.
-   */
-  is_priority?: boolean;
   checked_in_at?: string | null;
   /** Reason for visit (added by patient-booking migration; nullable on older DBs). */
   reason?: string | null;

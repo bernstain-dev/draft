@@ -4,7 +4,7 @@ import { useStaffAuth } from './auth/staffAuth';
 import type { Doctor, DoctorSchedule, DoctorUnavailable } from '../../lib/types';
 import { DAY_NAMES } from '../../lib/types';
 
-const WEEK_DAYS = [1, 2, 3, 4, 5]; // Mon–Fri
+const WEEK_DAYS = [0, 1, 2, 3, 4, 5, 6]; // Sun–Sat (all doctors run Mon–Sun hours)
 const WEEK_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function initials(name: string): string {
@@ -182,7 +182,7 @@ export default function Doctors() {
             <>
               <h2 className="font-semibold">Schedule this week</h2>
               <p className="mt-1 text-xs text-slate-500">◷ {selected.full_name} · {hoursLine}</p>
-              <div className="mt-3 grid grid-cols-5 gap-2 text-center">
+              <div className="mt-3 grid grid-cols-7 gap-2 text-center">
                 {WEEK_DAYS.map((dow) => {
                   const blocked = blockedDows.has(dow);
                   const open = openDows.has(dow);

@@ -132,8 +132,21 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
     if (error) return error.message;
     const uid = data.user?.id;
     if (!uid) return 'Login failed.';
-    const prof = await loadProfile(uid);
-    if (!prof || prof.role !== 'patient') {
+    let prof = await loadProfile(uid);
+    if (!prof) {
+      // Self-heal: account was created while email confirmation was ON,
+      // so the profile row does not exist yet. Create it now that a
+      // session exists (allowed by the profiles_insert_own policy).
+      const meta = data.user?.user_metadata as { full_name?: unknown } | undefined;
+      const metaName =
+        (typeof meta?.full_name === 'string' ? meta.full_name.trim() : '') || email.split('@')[0];
+      const { error: mkErr } = await patientSupabase
+        .from('profiles')
+        .insert({ id: uid, full_name: metaName, role: 'patient' });
+      if (mkErr) return 'Your account is not set up yet. Please contact the administrator.';
+      prof = { id: uid, full_name: metaName, role: 'patient' };
+    }
+    if (prof.role !== 'patient') {
       await patientSupabase.auth.signOut();
       setUser(null);
       setProfile(null);
@@ -153,10 +166,20 @@ export function PatientAuthProvider({ children }: { children: ReactNode }) {
   async function signUp(fullName: string, email: string, password: string): Promise<string | null> {
     const name = fullName.trim();
     if (!name) return 'Please enter your full name.';
-    const { data, error } = await patientSupabase.auth.signUp({ email, password });
+    const { data, error } = await patientSupabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
     if (error) return error.message;
     const u = data.user;
     if (!u) return 'Signup failed. Please try again.';
+    if (!data.session) {
+      // Email confirmation is ON in the Supabase project: there is no
+      // session yet, so the profile row cannot be inserted now (RLS
+      // needs auth.uid()). It is created on first sign-in (see signIn).
+      return 'Account created! Check your email to confirm, then sign in.';
+    }
     // Self-insert of the patient profile (allowed by profiles_insert_own policy).
     const { error: profErr } = await patientSupabase
       .from('profiles')

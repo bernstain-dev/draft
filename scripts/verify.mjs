@@ -91,7 +91,7 @@ check('shared LoginShell holds no auth logic (boundary)',
 
 // 6. Single seeder: admin + patient logins only, plus demo data
 check('seed.cjs creates admin + patient only (no receptionist/doctor/board)',
-  /vacunawa@rhu\.com\.ph/.test(seed) && /patient@rhu\.com\.ph/.test(seed) &&
+  /vacunawa@gmail\.com/.test(seed) && /patient@gmail\.com/.test(seed) &&
   !/receptionist/.test(seed) && !/doctor@rhu/.test(seed) && !/'board'/.test(seed));
 check('seed.cjs links patient login to a patient record', /user_id/.test(seed));
 check('seed.cjs seeds doctors/schedules/patients/appointments/notes',
