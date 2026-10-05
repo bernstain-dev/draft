@@ -1,3 +1,4 @@
+import { formatClinicDate, formatClinicTime } from './clinicTime';
 // Patient-facing helpers: friendly status labels, formatting, and messages.
 // No queue terminology here — the patient portal never shows queue numbers,
 // queue positions, or internal staff statuses (checked_in / waiting /
@@ -21,7 +22,6 @@ export function patientStatusLabel(dbStatus: string): PatientStatus {
     case 'checked_in':
     case 'waiting':
     case 'in_progress':
-    case 'confirmed':
     default:
       return 'Confirmed';
   }
@@ -42,19 +42,11 @@ export function patientStatusPill(dbStatus: string): string {
   }
 }
 
-export function formatDateLong(isoOrKey: string): string {
-  const d = isoOrKey.includes('T') ? new Date(isoOrKey) : new Date(`${isoOrKey}T12:00:00`);
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+export function formatDateLong(value: string): string {
+  return formatClinicDate(value, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
-
-export function formatDateShort(isoOrKey: string): string {
-  const d = isoOrKey.includes('T') ? new Date(isoOrKey) : new Date(`${isoOrKey}T12:00:00`);
-  return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
-}
-
-export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+export function formatDateShort(value: string): string { return formatClinicDate(value); }
+export const formatTime = formatClinicTime;
 
 /** "09:00" -> "9:00 AM" for slot buttons. */
 export function formatSlotTime(hhmm: string): string {

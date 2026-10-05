@@ -1,6 +1,16 @@
 const { createClient } = require('@supabase/supabase-js');
 
 const url = process.env.SUPABASE_URL;
+// Demonstration provisioning is strictly local. No hosted database override.
+if (url) {
+  let host;
+  try { host = new URL(url).hostname; } catch { console.error('Invalid local Supabase URL.'); process.exit(1); }
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(host)) {
+    console.error('Demonstration seeding is allowed only on loopback Supabase. Hosted seeding is refused.');
+    process.exit(1);
+  }
+}
+
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!url || !serviceKey) {
   console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars.');

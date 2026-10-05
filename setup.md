@@ -1,153 +1,76 @@
-# Setup Guide — MedicAppointment
+# MedicAppointment setup and staging guide
 
-Local development setup from zero to running app.
+This guide separates local development, fresh installation and incremental upgrade. Do not reset a database, use real patient data in tests, or run demonstration seeders against hosted services.
 
-## Prerequisites
+## Tools and local checks
 
-- **Node.js 18+** and **npm** (`node -v`, `npm -v`)
-- **Git**
-- A **Supabase** project (free tier is fine):
-  - Project URL — `https://<project-ref>.supabase.co`
-  - `anon` public key — Project Settings → API
-  - (Only for admin bootstrap / scripts) `service_role` key — keep secret,
-    never put it in `.env` or frontend code
-- Optional: Supabase CLI (only if deploying Edge Functions / cron)
+Use Node.js 24+ for the safe test suites, npm and Git. PostgreSQL 18 `initdb`, `pg_ctl`, and `psql` are used for local synthetic integration tests; they must be on PATH, or `PG_BIN` may name their local directory. Tests bind their temporary clusters to loopback, stop them and remove only their verified temporary directories. There is no remote database fallback.
 
-## 1. Clone and install
+Run `npm ci --ignore-scripts --no-audit --no-fund`, copy `.env.example` to `.env`, fill the public frontend values and run `npm run dev`. Run the build/static/Phase 1/2/3 commands in README for verification. The npm build uses `&&`, not the obsolete semicolon separator.
 
-```bash
-git clone https://github.com/vacunawajayare-pixel/MedicAppointment.git
-cd MedicAppointment   # folder on disk is MedicalAppointment
-npm install
-```
+## Frontend configuration
 
-## 2. Environment file
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```ini
-VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-key>
-VITE_NOTIFY_ENABLED=false
-```
-
-- Leave `VITE_NOTIFY_ENABLED=false` until the `send-confirmation`
-  Edge Function is deployed (otherwise booking skips the invoke —
-  this is intentional, avoids CORS noise).
-- `.env` is git-ignored. Never commit keys.
-
-## 3. Database — schema
-
-1. Open your Supabase project → **SQL Editor**.
-2. Paste the entire `supabase/full.sql` and run it (one-click: schema +
-   demo data; use `supabase/schema.sql` instead for schema only).
-   - Safe to re-run (all statements are `IF NOT EXISTS` / `DROP IF EXISTS` /
-     `CREATE OR REPLACE` / `ON CONFLICT DO NOTHING`).
-   - This creates tables, indexes (incl. double-booking guard
-     `uq_doctor_slot`), RLS policies (staff + patient), and the booking
-     RPCs (`book_appointment` / `reschedule_appointment` /
-     `cancel_appointment`), plus 10 doctors with Mon–Sun schedules,
-     10 patients, and demo appointments.
-3. Upgrading a database created with the old (pre-cleanup) schema?
-   Run `supabase/migrate_patient_booking.sql` instead — fresh installs
-   don't need it.
-
-## 4. Accounts + demo data — one seeder
-
-`supabase/seed.cjs` is the single seeder (accounts **and** demo data).
-It needs the `service_role` key via environment (never in `.env`):
-
-```powershell
-$env:SUPABASE_URL="https://<project-ref>.supabase.co"
-$env:SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
-$env:SUPABASE_ANON_KEY="<anon-key>"   # optional, for the login smoke test
-node supabase/seed.cjs
-```
-
-It creates (idempotent — safe to re-run):
-
-| Email | Password | Role | Portal |
-|---|---|---|---|
-| `vacunawa@gmail.com` | `admin123` | `admin` | `/appointments/login` |
-| `patient@gmail.com` | `patient123` | `patient` | `/patient/login` |
-
-plus demo data: 10 doctors (General Medicine, Pediatrics, OB-Gyne,
-Dentistry, Cardiology, Dermatology, Ophthalmology, ENT, Orthopedics,
-Internal Medicine) with Mon–Sun 08:00–17:00 schedules, 10 patients, and
-appointments across yesterday / today / tomorrow / next week covering
-every status — so staff Dashboard, Booking, Check-in, Patients, Doctors,
-Reports, and the patient portal (Dashboard / Book an Appointment /
-My Appointments / History) all render immediately. The patient demo
-account is linked to "Maria Santos", who already has upcoming visits.
-
-> Auth passwords are hashed by GoTrue and **cannot** be inserted with
-> SQL — that is why accounts live in the seeder (Admin API), not in a
-> `.sql` file. Prefer creating extra users the same way, or via
-> Authentication → Users in the Dashboard (patients can also
-> self-sign-up at `/patient/login` → Create account).
-
-The staff login form pre-fills `vacunawa@gmail.com` for convenience.
-
-## 5. Run the app
-
-```bash
-npm run dev
-```
-
-Open **http://localhost:5173** (Vite default for this project: port `5173`).
-
-| URL | Login | Result |
+| Variable | Required | Handling |
 |---|---|---|
-| `/patient/login` | `patient@gmail.com` / `patient123` | Patient portal (`/patient/dashboard` …) |
-| `/appointments/login` | `vacunawa@gmail.com` / `admin123` | Staff workspace (`/appointments/dashboard` …) |
+| `VITE_SUPABASE_URL` | Yes | Public endpoint |
+| `VITE_SUPABASE_ANON_KEY` | Yes | Public anon credential only |
+| `VITE_NOTIFY_ENABLED` | Optional | Default false; true permits browser invocation of already configured notification functions |
 
-## 6. Build / preview
+Vite embeds public `VITE_*` values in its bundle. Never prefix a service-role credential, cron secret or provider secret with `VITE_`. Never copy an existing private `.env` into the example. The supplied example is fake.
 
-```bash
-npm run build     # type-check + build to dist/
-npm run preview   # serve the production build locally
-```
+## Fresh and existing databases
 
-> Windows PowerShell note: `npm run build` may fail with
-> `error TS5025: Unknown compiler option '--noEmit;'` because the script
-> uses `;` (not a `cmd.exe` separator). Run instead:
-> ```powershell
-> npx tsc --noEmit; if ($?) { npx vite build }
-> ```
+For a fresh application database, review and install `supabase/schema.sql` with the intended database owner in an isolated staging project first. It includes the canonical Phase 1, 2 and 3 definitions. Create real Auth accounts independently; bootstrap the first administrator with an explicitly reviewed trusted backend/database operation. Existing administrators can use `admin_set_profile_role` for other accounts. Patients cannot promote themselves, and an admin cannot self-demote through the application RPC.
 
-## 7. Notifications (optional)
+For an existing post-cleanup project, review and apply these incremental files **in this order**:
 
-Edge Functions are provider-agnostic stubs — with no keys configured they
-log and return `stubbed: true`, and booking shows "logged (no provider)".
+1. `supabase/fix_phase1_security.sql`
+2. `supabase/fix_phase2_booking_availability.sql`
+3. `supabase/fix_phase3_notifications_reports.sql`
 
-1. Read `supabase/NOTIFICATIONS.md` (source of truth).
-2. Deploy:
-   ```bash
-   supabase functions deploy send-confirmation
-   supabase functions deploy send-reminders
-   supabase secrets set CRON_SECRET=$(openssl rand -hex 32)
-   ```
-3. When ready to send for real:
-   ```bash
-   supabase secrets set RESEND_API_KEY=... NOTIFY_FROM_EMAIL=...
-   supabase secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_FROM_NUMBER=...
-   ```
-4. Fill `<PROJECT_REF>` / `<CRON_SECRET>` in `supabase/cron.sql` and run it
-   (or schedule 07:00 daily in Dashboard → Edge Functions → Schedules).
-5. Set `VITE_NOTIFY_ENABLED=true` in `.env` and restart dev server.
-6. Test: book an appointment → "Confirmation sent ✓".
+For an already installed version whose Admin Dashboard or Reports fails with `cannot execute SELECT FOR SHARE in a read-only transaction`, run [supabase/fix_admin_reports_readonly.sql](./supabase/fix_admin_reports_readonly.sql) in SQL Editor and refresh the affected page. It updates only the two report RPC definitions and their execute permissions. Current Phase 3 and fresh-install files include the correction; no data reset or demo import is needed.
 
-## Troubleshooting
+Use `migrate_patient_booking.sql` only for the matching legacy schema; it converges through the same canonical blocks. Do not rerun fresh schema SQL over an arbitrary deployed database as an upgrade. Preflight failures preserve data and require private, authorized review; they do not justify deleting or silently normalizing real records. Back up and assess locks/ownership/RLS drift in staging before a later separately authorized production rollout.
 
-| Symptom | Cause / fix |
+`full.sql` is a schema-plus-demo convenience file for disposable local demonstrations only. `seed.cjs` also provisions demonstration identities/data and now refuses non-loopback URLs. Do not bypass that guard with a tunnel. Its fixed demonstration identities are unsuitable for a real deployment; remove/rotate any already deployed demonstration accounts. No example username/password is reproduced in this guide.
+
+## Patient identity management
+
+Registration provisions a patient-only profile and at most one patient row for the exact Auth UUID. Names are display data, not proof of identity. Clinic-created records stay unlinked until an authorized admin verifies identity outside the app and uses Patients → Link Auth identity. The form identifies the clinic record, requires an exact UUID and verification/confirmation, and surfaces backend conflicts.
+
+Link before first portal provisioning where possible. If the Auth account already owns another patient record, the function refuses: it does not merge/delete histories. Review actual identity outside the app and use a separate authorized reconciliation plan if needed. Never paste service-role credentials into this form.
+
+## Edge Function configuration
+
+| Variable | Required / purpose |
 |---|---|
-| `Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY` | `.env` missing or dev server started before creating it — create `.env`, restart `npm run dev` |
-| Login succeeds but redirected back to login | No `profiles` row / wrong `role` for that portal — check `select * from profiles where id = '<uuid>'`; staff portal needs `admin`, patient portal needs `patient` (re-run the seeder or fix the role in Settings → User roles) |
-| Booking shows notification error / CORS noise | `VITE_NOTIFY_ENABLED` is true but function not deployed — set it back to `false` until deployed |
-| `TS5025 --noEmit;` on `npm run build` (Windows) | See §6 workaround |
-| Port 5173 in use | `npx vite --port 5174` or stop the other process |
-| Pushed 403 `Permission denied` | Collaborator invite not accepted or stale Windows credential — accept invite as that GitHub user, then `echo "url=https://github.com" \| git credential-manager reject` and push again |
+| `SUPABASE_URL` | Runtime project endpoint |
+| `SUPABASE_ANON_KEY` | Runtime public key for verifying the caller through Auth |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only worker RPC access; never frontend |
+| `CRON_SECRET` | Strong independent server secret matching the named Vault secret |
+| `NOTIFY_ALLOWED_ORIGINS` | Comma-separated exact frontend origins; no wildcard, no trailing path; unset means browser origins are refused |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` | Server-only SMS provider configuration |
+| `NOTIFY_STATUS_CALLBACK_URL` | Optional exact public HTTPS callback URL for signed delivery tracking |
+
+Runtime Supabase variables may be platform supplied; verify availability in staging. Provider secrets are entered through the platform secret manager, not repository files. No email column/channel is wired; do not assume configuring a Resend key enables email.
+
+Review `supabase/config.toml`: gateway `verify_jwt=false` permits preflight/custom scheduler/webhook authentication. `send-confirmation` itself verifies the real Auth JWT and calls an ownership/role-authorized SQL operation; reminders require the server cron secret; delivery callbacks require a valid provider HMAC. Turning gateway verification off is not removing handler authorization.
+
+Deployment, if later authorized in staging, comprises the three reviewed function entries `send-confirmation`, `send-reminders`, `notification-status`, the Phase 3 database migration, exact origin configuration, and optional callback URL. `VITE_NOTIFY_ENABLED=true` should follow successful staging verification, not precede it. A booking is never rolled back merely because notification processing fails.
+
+## Scheduler and Realtime
+
+Read [NOTIFICATIONS.md](./supabase/NOTIFICATIONS.md). Enable the Supabase Vault/pg_cron/pg_net capabilities in staging and securely configure the three required Vault names; then review `fix_phase3_scheduler.sql`. It installs one named five-minute worker, not a plaintext credential template. Tomorrow's clinic date and the 07:00 Manila reminder gate are calculated in SQL, independent of cron/runtime timezone. The job also drains booking/reschedule/cancellation notices. Automatic execution is unverified until it is deliberately installed and exercised.
+
+For the advertised staff cross-client updates, review `enable_phase3_realtime.sql` in staging. It adds only appointments to the existing publication, preserves default replica identity, and does not change RLS. The staff provider owns one subscription and unsubscribes on role/identity/unmount. Test two synthetic admin sessions and patient isolation against the actual hosted publication. Do not assume local mock event tests establish live Realtime delivery.
+
+## Staging checklist and unresolved operational work
+
+- Verify Phase 1/2 privileges, exact-slot index, all definer search paths, new ledger RLS/service ACLs, and complete report results beyond the REST row cap.
+- Configure hosted Auth email/password policies. The app requests at least eight characters; the actual Auth service policy and real password/email-confirmation flows must be verified independently.
+- Exercise notification OPTIONS/errors, own patient/admin authorization, failed provider requests, duplicate calls, stale/rescheduled/cancelled reminders and signed callbacks with synthetic provider endpoints/accounts first.
+- Verify actual SMS acceptance/delivery, webhook signature URL/proxy handling, callback retry behavior and Supabase scheduler response status. Check ledger backlog/unknown holds privately. Never automatically resend an ambiguous accepted-or-timeout attempt.
+- Test CSV exports in the intended spreadsheet applications. Dangerous text is apostrophe-prefixed before CSV quoting; consumers may visibly retain that safety prefix. Unicode is retained with a UTF-8 BOM.
+- Remove/rotate any deployed demo accounts. `secret.txt` is still tracked; ignore rules alone do not sanitize Git history. Privately review/rotate/remove it in a reviewed follow-up; no history rewrite was performed here.
+
+No production migration, deployment, reset, provider send or hosted seeder was performed by remediation.

@@ -1,133 +1,61 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Calendar, ChevronLeft, ChevronRight, CircleCheck, Download, SlidersHorizontal, TriangleAlert } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { clinicDateKey, addClinicDays, formatClinicDateTime } from '../../lib/clinicTime';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
+import { useEffect, useState } from 'react';
 import { getStaffClient } from './auth/staffAuth';
 
-interface ApptRow {
-  id: string;
-  status: string;
-  source: string;
-  scheduled_time: string;
-  doctor?: { id?: string; full_name: string } | null;
-  patient?: { id?: string; full_name: string; contact_number?: string | null } | null;
-}
-
-interface AuditRow {
-  id: string;
-  action: string;
-  entity: string;
-  created_at: string;
-}
-
-function isoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-function downloadCsv(filename: string, header: string[], rows: (string | number)[][]) {
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
-  const csv = [header.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+import QueryState from '../../components/QueryState';
+import { downloadCsv } from '../../lib/csv';
+interface AuditRow { id: string; action: string; entity: string; created_at: string }
+interface DoctorStat { id: string; name: string; total: number; completed: number; cancelled: number; noShow: number; walkIn: number }
+interface PatientStat { id: string; name: string; contact: string; total: number; noShow: number }
+interface Report { total: number; noShows: number; cancelled: number; walkIns: number; doctors: { id: string; name: string }[]; perDoctor: DoctorStat[]; perDay: Record<string, number>; noShowPatients: PatientStat[] }
+const EMPTY: Report = { total: 0, noShows: 0, cancelled: 0, walkIns: 0, doctors: [], perDoctor: [], perDay: {}, noShowPatients: [] };
 
 const NO_SHOW_FLAG_THRESHOLD = 2; // patients with >=2 no-shows get flagged
 const REPEAT_NO_SHOW = 3; // >=3 gets the strong "repeat" badge
 
 export default function Reports() {
   const sb = getStaffClient();
-  const [from, setFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return isoDay(d);
-  });
-  const [to, setTo] = useState(() => isoDay(new Date()));
+  const revision = useAppointmentRevision();
+  const [from, setFrom] = useState(() => addClinicDays(clinicDateKey(), -30));
+  const [to, setTo] = useState(() => clinicDateKey());
   const [doctorFilter, setDoctorFilter] = useState('all');
-  const [rows, setRows] = useState<ApptRow[]>([]);
-  const [doctors, setDoctors] = useState<string[]>([]);
-  const [audit, setAudit] = useState<AuditRow[]>([]);
   const [auditAction, setAuditAction] = useState('all');
   const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    const s = new Date(`${from}T00:00:00`).toISOString();
-    const e = new Date(`${to}T23:59:59`).toISOString();
-    setMsg(null);
-    sb.from('appointments')
-      .select('id,status,source,scheduled_time,doctor:doctors!inner(full_name),patient:patients(full_name,contact_number)')
-      .gte('scheduled_time', s)
-      .lte('scheduled_time', e)
-      .order('scheduled_time')
-      .limit(5000)
-      .then(({ data, error }) => {
-        if (error) {
-          setMsg(error.message);
-          return;
-        }
-        const list = (data as unknown as ApptRow[]) ?? [];
-        setRows(list);
-        setDoctors([...new Set(list.map((r) => r.doctor?.full_name ?? 'Unknown'))].sort());
-      });
-    sb.from('audit_log')
-      .select('id,action,entity,created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
-      .then(({ data }) => setAudit((data as AuditRow[]) ?? []));
-  }, [from, to, sb]);
-
-  const scoped = useMemo(
-    () => (doctorFilter === 'all' ? rows : rows.filter((r) => (r.doctor?.full_name ?? 'Unknown') === doctorFilter)),
-    [rows, doctorFilter]
-  );
-
-  const stats = useMemo(() => {
-    const perDoctor: Record<string, { total: number; completed: number; cancelled: number; noShow: number; walkIn: number }> = {};
-    const perDay: Record<string, number> = {};
-    const perPatient: Record<string, { name: string; contact: string; total: number; noShow: number }> = {};
-    let ns = 0, cx = 0, walk = 0;
-    for (const r of scoped) {
-      const dn = r.doctor?.full_name ?? 'Unknown';
-      perDoctor[dn] ??= { total: 0, completed: 0, cancelled: 0, noShow: 0, walkIn: 0 };
-      perDoctor[dn].total += 1;
-      if (r.status === 'completed') perDoctor[dn].completed += 1;
-      if (r.status === 'cancelled') { perDoctor[dn].cancelled += 1; cx += 1; }
-      if (r.status === 'no_show') { perDoctor[dn].noShow += 1; ns += 1; }
-      if (r.source === 'walk_in') { perDoctor[dn].walkIn += 1; walk += 1; }
-      const dk = r.scheduled_time.slice(0, 10);
-      perDay[dk] = (perDay[dk] ?? 0) + 1;
-      const pn = r.patient?.full_name ?? 'Unknown';
-      const key = `${pn}|${r.patient?.contact_number ?? ''}`;
-      perPatient[key] ??= { name: pn, contact: r.patient?.contact_number ?? '', total: 0, noShow: 0 };
-      perPatient[key].total += 1;
-      if (r.status === 'no_show') perPatient[key].noShow += 1;
-    }
-    const total = scoped.length;
-    const dayKeys = Object.keys(perDay).sort();
-    const maxDay = Math.max(1, ...Object.values(perDay));
-    const noShowPatients = Object.values(perPatient)
-      .filter((p) => p.noShow >= NO_SHOW_FLAG_THRESHOLD)
-      .sort((a, b) => b.noShow - a.noShow);
-    return {
-      total, perDoctor, perDay, dayKeys, maxDay,
-      noShowRate: total ? (ns / total) * 100 : 0,
-      cancelRate: total ? (cx / total) * 100 : 0,
-      walkInShare: total ? (walk / total) * 100 : 0,
-      noShowPatients,
-      perDoctorRows: Object.entries(perDoctor).map(([name, v]) => ({ name, ...v })).sort((a, b) => b.total - a.total),
-    };
-  }, [scoped]);
-
-  const auditFiltered = auditAction === 'all' ? audit : audit.filter((a) => a.action === auditAction);
+  const [auditPage, setAuditPage] = useState(0);
+  useEffect(() => setAuditPage(0), [from, to, auditAction]);
+  const validRange = from && to && from <= to;
+  const list = useClinicQuery<Report>(validRange ? `${from}/${to}/${doctorFilter}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.rpc('staff_appointment_report', { p_from: from, p_to: to, p_doctor_id: doctorFilter === 'all' ? null : doctorFilter }).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('Report response is missing.');
+    return data as Report;
+  }, EMPTY);
+  const auditQuery = useClinicQuery<{ rows: AuditRow[]; total: number; actions: string[] }>(validRange ? `${from}/${to}/${auditAction}/${auditPage}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.rpc('staff_report_audit', { p_from: from, p_to: to, p_action: auditAction === 'all' ? null : auditAction, p_offset: auditPage * 100, p_limit: 100 }).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('Audit response is missing.');
+    return data;
+  }, { rows: [], total: 0, actions: [] });
+  const doctors = list.data.doctors;
+  const report = list.data;
+  const stats = { total: report.total, noShowRate: report.total ? report.noShows / report.total * 100 : 0,
+    walkInShare: report.total ? report.walkIns / report.total * 100 : 0,
+    perDoctorRows: report.perDoctor, perDay: report.perDay, dayKeys: Object.keys(report.perDay).sort(),
+    maxDay: Math.max(1, ...Object.values(report.perDay)), noShowPatients: report.noShowPatients };
+  const auditFiltered = auditQuery.data.rows;
 
   function setPreset(days: number) {
-    const t = new Date();
-    const f = new Date();
-    f.setDate(t.getDate() - (days - 1));
-    setFrom(isoDay(f));
-    setTo(isoDay(t));
+    setFrom(addClinicDays(clinicDateKey(), -(days - 1)));
+    setTo(clinicDateKey());
   }
 
+  if (list.loading) return <QueryState query={list} label="reports" />;
+  if (list.error) return <div><QueryState query={list} label="reports" /><button onClick={() => setPreset(30)}>Reset report to last 30 days</button></div>;
+  if (!validRange) return <div role="alert"><AppIcon icon={TriangleAlert} /> Choose a valid date range. <button onClick={() => setPreset(30)}>Reset range</button></div>;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -146,20 +74,20 @@ export default function Reports() {
             ))}
           </div>
           <label className="flex items-center gap-1.5 text-xs text-slate-400">
-            From
+            <AppIcon icon={Calendar} size={16} />From
             <input className="dk-input max-w-[150px]" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </label>
           <label className="flex items-center gap-1.5 text-xs text-slate-400">
-            To
+            <AppIcon icon={Calendar} size={16} />To
             <input className="dk-input max-w-[150px]" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
-          <select className="dk-input max-w-[160px]" value={doctorFilter} onChange={(e) => setDoctorFilter(e.target.value)}>
+          <AppIcon icon={SlidersHorizontal} size={16} /><select className="dk-input max-w-[160px]" value={doctorFilter} onChange={(e) => setDoctorFilter(e.target.value)}>
             <option value="all">All doctors</option>
-            {doctors.map((d) => <option key={d} value={d}>{d}</option>)}
+            {doctors.map((d) => <option key={d.id} value={d.id}>{d.name} · {d.id.slice(0, 8)}</option>)}
           </select>
         </div>
       </div>
-      {msg && <p className="text-sm text-red-400">{msg}</p>}
+      {(msg || list.error) && <p className="text-sm text-red-400">{list.error || msg}</p>}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="dk-panel">
@@ -180,11 +108,11 @@ export default function Reports() {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Appointments per doctor</h2>
           <button
-            className="dk-btn-ghost px-3 py-1 text-xs"
+            className="icon-button dk-btn-ghost px-3 py-1 text-xs"
             onClick={() => downloadCsv('appointments-per-doctor.csv', ['doctor', 'total', 'completed', 'cancelled', 'no_show', 'walk_in'],
               stats.perDoctorRows.map((d) => [d.name, d.total, d.completed, d.cancelled, d.noShow, d.walkIn]))}
           >
-            ⭳ CSV
+            <AppIcon icon={Download} size={16} />CSV
           </button>
         </div>
         <div className="mt-2 overflow-x-auto">
@@ -199,7 +127,7 @@ export default function Reports() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {stats.perDoctorRows.map((d) => (
-                <tr key={d.name}>
+                <tr key={d.id}>
                   <td className="dk-td font-medium">{d.name}</td>
                   <td className="dk-td">{d.total}</td>
                   <td className="dk-td">{d.completed}</td>
@@ -218,10 +146,10 @@ export default function Reports() {
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Appointments per day</h2>
           <button
-            className="dk-btn-ghost px-3 py-1 text-xs"
+            className="icon-button dk-btn-ghost px-3 py-1 text-xs"
             onClick={() => downloadCsv('appointments-per-day.csv', ['date', 'count'], stats.dayKeys.map((k) => [k, stats.perDay[k]]))}
           >
-            ⭳ CSV
+            <AppIcon icon={Download} size={16} />CSV
           </button>
         </div>
         {stats.dayKeys.length === 0 ? (
@@ -241,23 +169,23 @@ export default function Reports() {
 
       {stats.noShowPatients.length === 0 ? (
         <div className="dk-panel border-green-500/20 bg-green-500/10">
-          <p className="text-sm font-medium text-green-400">✓ No repeat no-shows in this range.</p>
+          <p className="icon-label text-sm font-medium text-green-400"><AppIcon icon={CircleCheck} size={16} />No repeat no-shows in this range.</p>
         </div>
       ) : (
         <div className="dk-panel">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">No-show tracking (flagged ≥ {NO_SHOW_FLAG_THRESHOLD})</h2>
             <button
-              className="dk-btn-ghost px-3 py-1 text-xs"
+              className="icon-button dk-btn-ghost px-3 py-1 text-xs"
               onClick={() => downloadCsv('no-show-patients.csv', ['patient', 'contact', 'appointments', 'no_shows'],
                 stats.noShowPatients.map((p) => [p.name, p.contact, p.total, p.noShow]))}
             >
-              ⭳ CSV
+              <AppIcon icon={Download} size={16} />CSV
             </button>
           </div>
           <div className="mt-2 divide-y divide-white/5 text-sm">
             {stats.noShowPatients.map((p) => (
-              <div key={`${p.name}|${p.contact}`} className="flex flex-wrap items-center gap-2 py-1.5">
+              <div key={p.id} className="flex flex-wrap items-center gap-2 py-1.5">
                 <span className="font-medium">{p.name}</span>
                 <span className="text-slate-500">{p.contact}</span>
                 <span className="dk-pill bg-red-500/15 text-red-400">{p.noShow} no-show / {p.total} appts</span>
@@ -271,17 +199,19 @@ export default function Reports() {
       <div className="dk-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="font-semibold">Audit log (admin only)</h2>
+          <QueryState query={auditQuery} label="audit log" />
           <select className="dk-input max-w-[180px]" value={auditAction} onChange={(e) => setAuditAction(e.target.value)}>
             <option value="all">all actions</option>
-            {[...new Set(audit.map((a) => a.action))].map((a) => <option key={a} value={a}>{a}</option>)}
+            {auditQuery.data.actions.map((a) => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
         <div className="mt-2 divide-y divide-white/5 text-sm">
-          {auditFiltered.slice(0, 100).map((a) => (
-            <div key={a.id} className="py-1.5 text-slate-300">{new Date(a.created_at).toLocaleString()} · {a.entity} · {a.action}</div>
+          {auditFiltered.map((a) => (
+            <div key={a.id} className="py-1.5 text-slate-300">{formatClinicDateTime(a.created_at)} · {a.entity} · {a.action}</div>
           ))}
-          {auditFiltered.length === 0 && <p className="py-2 text-sm text-slate-500">Empty — no activity yet, filter excludes all, or you are not admin (RLS).</p>}
+          {!auditQuery.loading && !auditQuery.error && auditFiltered.length === 0 && <p className="py-2 text-sm text-slate-500">No audit activity in this date range/filter.</p>}
         </div>
+        <div className="mt-3 flex gap-3"><button disabled={auditPage === 0 || auditQuery.loading} onClick={() => setAuditPage(p => p - 1)} className="icon-button"><AppIcon icon={ChevronLeft} size={16} />Previous</button><span>{auditQuery.data.total} matching entries · page {auditPage + 1}</span><button disabled={(auditPage + 1) * 100 >= auditQuery.data.total || auditQuery.loading} onClick={() => setAuditPage(p => p + 1)} className="icon-button">Next<AppIcon icon={ChevronRight} size={16} /></button></div>
       </div>
     </div>
   );

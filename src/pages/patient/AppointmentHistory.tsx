@@ -1,3 +1,8 @@
+import { CalendarPlus, History } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { fetchAllRows } from '../../lib/fetchAllRows';
+import QueryState from '../../components/QueryState';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getPatientClient, usePatientAuth } from './auth/patientAuth';
@@ -13,30 +18,22 @@ const HISTORY = ['completed', 'cancelled', 'no_show'];
 export default function AppointmentHistory() {
   const sb = getPatientClient();
   const { patient } = usePatientAuth();
-  const [rows, setRows] = useState<Row[]>([]);
+  const revision = useAppointmentRevision();
   const [filter, setFilter] = useState('all');
   const [msg, setMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!patient) return;
-    sb.from('appointments')
-      .select('*, doctor:doctors(*)')
-      .eq('patient_id', patient.id)
-      .in('status', HISTORY)
-      .order('scheduled_time', { ascending: false })
-      .limit(100)
-      .then(({ data, error }) => {
-        if (error) setMsg(error.message);
-        else setRows((data as Row[]) ?? []);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patient?.id]);
+  const list = useClinicQuery<Row[]>(patient ? `${patient.id}/${revision}` : '', async (signal) => {
+    return fetchAllRows<Row>(offset => sb.from('appointments').select('*, doctor:doctors(*)', { count: 'exact' }).eq('patient_id', patient!.id)
+      .in('status', HISTORY).order('scheduled_time', { ascending: false }).order('id').range(offset, offset + 499).abortSignal(signal));
+  }, []);
+  const rows = list.data;
 
   const filtered = useMemo(
     () => (filter === 'all' ? rows : rows.filter((r) => patientStatusLabel(r.status) === filter)),
     [rows, filter]
   );
 
+  if (list.loading || list.error) return <QueryState query={list} label="appointments" />;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -44,8 +41,8 @@ export default function AppointmentHistory() {
           <h1 className="text-2xl font-bold">Appointment History</h1>
           <p className="text-sm text-slate-400">Your past and closed visits.</p>
         </div>
-        <Link className="dk-btn-primary" to="/patient/book">
-          + Book an Appointment
+        <Link className="icon-button dk-btn-primary" to="/patient/book">
+          <AppIcon icon={CalendarPlus} size={17} />Book an Appointment
         </Link>
       </div>
 
@@ -64,10 +61,11 @@ export default function AppointmentHistory() {
         </select>
       </div>
 
-      {msg && <p role="status" className="text-sm text-slate-300">{msg}</p>}
+      {(msg || list.error) && <p role="status" className="text-sm text-slate-300">{list.error || msg}</p>}
 
       {filtered.length === 0 ? (
         <div className="dk-panel mx-auto max-w-md space-y-2 py-10 text-center">
+          <p className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/5"><AppIcon icon={History} size={24} /></p>
           <h2 className="text-lg font-semibold">No History Yet</h2>
           <p className="text-sm text-slate-400">Your completed and past appointments will appear here.</p>
           <Link to="/patient/book" className="dk-btn-primary mt-2 inline-block">

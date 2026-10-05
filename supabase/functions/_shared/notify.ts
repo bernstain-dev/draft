@@ -1,76 +1,42 @@
-// Shared provider stubs — import from ../_shared/notify.ts
-// Env (set via `supabase secrets set`):
-//   RESEND_API_KEY, NOTIFY_FROM_EMAIL   -> email via Resend
-//   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER -> SMS via Twilio
-// If none are set, send() logs the message and returns { stubbed: true }
-// so the app works end-to-end before a provider is chosen.
-
-export interface NotifyPayload {
-  to_email?: string | null;
-  to_phone?: string | null;
-  subject: string;
-  text: string;
-}
-
+// Provider boundary. Never log destination, message, provider body or secrets.
+export type Env = (name: string) => string | undefined;
 export interface NotifyResult {
-  channel: 'email' | 'sms' | 'none';
-  stubbed: boolean;
-  ok: boolean;
-  detail: string;
+  ok: boolean; provider: 'twilio' | 'none'; accepted: boolean; stubbed: boolean;
+  status: 'accepted' | 'failed' | 'unknown' | 'stubbed';
+  reference: string | null; error: string | null; retry: boolean; delivery: 'not_verified';
 }
-
-export async function sendNotification(p: NotifyPayload): Promise<NotifyResult[]> {
-  const out: NotifyResult[] = [];
-  const resendKey = Deno.env.get('RESEND_API_KEY');
-  const fromEmail = Deno.env.get('NOTIFY_FROM_EMAIL') ?? 'clinic@example.com';
-  const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
-  const token = Deno.env.get('TWILIO_AUTH_TOKEN');
-  const fromNum = Deno.env.get('TWILIO_FROM_NUMBER');
-
-  if (p.to_email) {
-    if (resendKey) {
-      try {
-        const r = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from: fromEmail, to: p.to_email, subject: p.subject, text: p.text }),
-        });
-        out.push({ channel: 'email', stubbed: false, ok: r.ok, detail: `resend:${r.status}` });
-      } catch (e) {
-        out.push({ channel: 'email', stubbed: false, ok: false, detail: String(e) });
-      }
-    } else {
-      console.log(`[notify-stub][email] to=${p.to_email} subject=${p.subject} :: ${p.text}`);
-      out.push({ channel: 'email', stubbed: true, ok: true, detail: 'no RESEND_API_KEY; logged only' });
-    }
-  }
-  if (p.to_phone) {
-    if (sid && token && fromNum) {
-      try {
-        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-          method: 'POST',
-          headers: {
-            Authorization: 'Basic ' + btoa(`${sid}:${token}`),
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({ From: fromNum, To: p.to_phone, Body: `${p.subject} — ${p.text}` }),
-        });
-        out.push({ channel: 'sms', stubbed: false, ok: r.ok, detail: `twilio:${r.status}` });
-      } catch (e) {
-        out.push({ channel: 'sms', stubbed: false, ok: false, detail: String(e) });
-      }
-    } else {
-      console.log(`[notify-stub][sms] to=${p.to_phone} :: ${p.subject} — ${p.text}`);
-      out.push({ channel: 'sms', stubbed: true, ok: true, detail: 'no TWILIO_* env; logged only' });
-    }
-  }
-  if (out.length === 0) {
-    console.log(`[notify-stub][none] ${p.subject} :: ${p.text}`);
-    out.push({ channel: 'none', stubbed: true, ok: true, detail: 'no destination address on file' });
-  }
-  return out;
+export function normalizePhone(value: string | null): string | null {
+  if (!value) return null;
+  const compact = value.replace(/[ ()-]/g, '');
+  if (/^09\d{9}$/.test(compact)) return '+63' + compact.slice(1);
+  if (/^639\d{9}$/.test(compact)) return '+' + compact;
+  return /^\+[1-9]\d{6,14}$/.test(compact) ? compact : null;
 }
-
-export function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+export async function sendNotification(phone: string | null, text: string, env: Env, network: typeof fetch = fetch): Promise<NotifyResult> {
+  const result = (status: NotifyResult['status'], error: string | null, reference: string | null = null, retry = false): NotifyResult => ({
+    ok: status === 'accepted', provider: status === 'stubbed' ? 'none' : 'twilio', accepted: status === 'accepted',
+    stubbed: status === 'stubbed', status, reference, error, retry, delivery: 'not_verified',
+  });
+  if (!phone) return result('stubbed', 'no_destination');
+  const destination = normalizePhone(phone);
+  if (!destination) return result('failed', 'invalid_destination');
+  const sid = env('TWILIO_ACCOUNT_SID'), token = env('TWILIO_AUTH_TOKEN'), from = env('TWILIO_FROM_NUMBER');
+  if (!sid || !token || !from) return result('stubbed', 'not_configured');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await network(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/Messages.json`, {
+      method: 'POST', headers: { Authorization: 'Basic ' + btoa(`${sid}:${token}`), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ From: from, To: destination, Body: text,
+        ...(env('NOTIFY_STATUS_CALLBACK_URL') ? { StatusCallback: env('NOTIFY_STATUS_CALLBACK_URL')! } : {}) }), signal: controller.signal,
+    });
+    if (response.status >= 500) return result('unknown', 'transport_unknown');
+    if (response.status === 429) return result('failed', 'rate_limited', null, true);
+    if (!response.ok) return result('failed', 'provider_rejected');
+    const body = await response.json();
+    if (!body || typeof body.sid !== 'string' || !/^SM[0-9a-f]{32}$/i.test(body.sid)) return result('unknown', 'transport_unknown');
+    if (body.error_code || ['failed', 'undelivered', 'canceled'].includes(body.status)) return result('failed', 'provider_rejected');
+    return result('accepted', null, body.sid);
+  } catch { return result('unknown', 'transport_unknown'); }
+  finally { clearTimeout(timer); }
 }

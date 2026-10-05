@@ -1,28 +1,3 @@
--- ============================================================
--- Reminder cron — calls send-reminders daily at 07:00 (project TZ).
--- Requires pg_cron + pg_net (Supabase: Database > Extensions > enable).
--- Set secrets first:
---   supabase secrets set CRON_SECRET=$(openssl rand -hex 32)
--- Then paste your project ref + secrets below and run this file.
--- Alternatively use the Dashboard: Edge Functions > send-reminders > Schedules.
--- ============================================================
-
--- select cron.schedule(
---   'daily-appointment-reminders',
---   '0 7 * * *',
---   $$
---   select net.http_post(
---     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/send-reminders',
---     headers := jsonb_build_object(
---       'Content-Type', 'application/json',
---       'x-cron-secret', '<CRON_SECRET>'
---     ),
---     body := '{}'::jsonb
---   );
---   $$
--- );
-
--- Manage:
--- select * from cron.job;                      -- list jobs
--- select * from cron.job_run_details order by start_time desc limit 10;  -- history
--- select cron.unschedule('daily-appointment-reminders');  -- remove
+-- Executable Vault-authenticated definition: fix_phase3_scheduler.sql.
+-- Review NOTIFICATIONS.md; install only after Phase 3 staging verification.
+-- This compatibility pointer intentionally installs nothing.

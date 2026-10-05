@@ -1,93 +1,75 @@
--- ============================================================
--- RLS verification tests — run AFTER schema.sql (+ seed.cjs)
--- How to use: create the 2 seed users (admin / patient) via
--- `node supabase/seed.cjs`, then run these SELECTs in the SQL editor
--- using "Run as" -> that user, or from the app with each user's JWT.
---
--- EXPECTED RESULTS are in comments. Any deviation = STOP.
--- ============================================================
+-- Phase 1 READ-ONLY catalog verification: no patient records or mutations.
+-- Runtime authorization/concurrency tests: node scripts/test-phase1.mjs
+-- Review/run these SELECTs manually after applying the migration.
 
--- 0) Sanity: double-booking constraint exists, queue objects are gone
-select indexname, indexdef
-from pg_indexes
-where tablename = 'appointments' and indexname = 'uq_doctor_slot';
--- EXPECTED: 1 row, predicate "WHERE status <> ALL ('{cancelled,no_show}')"
+-- Expected: one UNIQUE doctor_id/scheduled_time index excluding cancelled/no_show.
+select indexname, indexdef from pg_indexes
+where schemaname = 'public' and tablename = 'appointments' and indexname = 'uq_doctor_slot';
 
-select count(*) as queue_objects_remaining
-from (
-  select 1 from pg_proc where proname in ('assign_queue_number','get_queue_today','can_access_queue')
-  union all
-  select 1 from pg_views where viewname = 'queue_today'
-  union all
-  select 1 from information_schema.columns
-  where table_name = 'appointments' and column_name = 'queue_number'
-) t;
--- EXPECTED: 0
+-- Expected: profiles own SELECT/INSERT/UPDATE plus admin SELECT/UPDATE;
+-- appointments only patient SELECT and admin SELECT. No mutation policies.
+select tablename, policyname, roles, cmd, qual, with_check
+from pg_policies where schemaname = 'public' and tablename in ('profiles','appointments')
+order by tablename, policyname;
 
--- 1) ADMIN: full base-table access
--- Run as admin user:
--- select * from patients limit 1;        -- OK (0+ rows, no error)
--- select * from appointments limit 1;    -- OK
--- select * from doctors limit 1;         -- OK
--- select * from doctor_schedules limit 1;-- OK
+-- Expected: role INSERT/UPDATE false; full_name UPDATE true;
+-- appointment SELECT true, INSERT/UPDATE/DELETE false for browser roles.
+select
+  has_column_privilege('authenticated','public.profiles','role','INSERT') as can_insert_role,
+  has_column_privilege('authenticated','public.profiles','role','UPDATE') as can_update_role,
+  has_column_privilege('authenticated','public.profiles','full_name','UPDATE') as can_update_name,
+  has_table_privilege('authenticated','public.appointments','SELECT') as can_read_appointments,
+  has_table_privilege('authenticated','public.appointments','INSERT') as can_insert_appointments,
+  has_table_privilege('authenticated','public.appointments','UPDATE') as can_update_appointments,
+  has_table_privilege('authenticated','public.appointments','DELETE') as can_delete_appointments;
 
--- 2) PATIENT isolation. Run as patient@gmail.com (Maria Santos):
--- select * from patients;
--- EXPECTED: exactly 1 row — Maria Santos (own row via user_id only)
+-- Expected: definer functions have search_path=""; private helpers/trigger
+-- functions deny authenticated EXECUTE; public RPCs allow it.
+-- Anonymous EXECUTE must be false for every listed function.
+select p.oid::regprocedure as function, p.prosecdef, p.proconfig,
+  has_function_privilege('authenticated', p.oid, 'EXECUTE') as authenticated_execute,
+  has_function_privilege('anon', p.oid, 'EXECUTE') as anonymous_execute
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname in (
+  'is_admin','my_patient_id','_require_admin','_require_patient','admin_set_profile_role',
+  '_assert_slot_bookable','book_appointment','staff_book_appointment',
+  '_reschedule_appointment','reschedule_appointment','staff_reschedule_appointment',
+  '_cancel_appointment','cancel_appointment','staff_cancel_appointment',
+  'staff_check_in_appointment','staff_set_appointment_status',
+  'audit_appointment_changes','set_updated_at')
+order by p.proname;
 
--- select * from appointments;
--- EXPECTED: ONLY Maria Santos' own appointments (…003, …011, …007? no —
--- …007 is Liza's). Own rows only, never another patient's.
+-- Expected: default is patient. This reads configuration, not profile rows.
+select column_default from information_schema.columns
+where table_schema = 'public' and table_name = 'profiles' and column_name = 'role';
 
--- select * from doctors;
--- EXPECTED: active doctors only (is_active = true).
+-- Phase 2: expected two validated constraints; exclusion uses doctor/day/range.
+select conname, convalidated, pg_get_constraintdef(oid)
+from pg_constraint where conrelid = 'public.doctor_schedules'::regclass
+  and conname in ('phase2_schedule_minutes_check','phase2_schedule_no_overlap');
 
--- select * from doctor_schedules;
--- EXPECTED: schedules of active doctors only.
+-- Expected: patient linking is not a generic client UPDATE permission.
+select has_column_privilege('authenticated','public.patients','user_id','UPDATE') as can_change_link,
+  has_column_privilege('authenticated','public.patients','full_name','UPDATE') as can_change_name;
 
--- select * from doctor_unavailable_dates;
--- EXPECTED: blocked dates of active doctors only.
+-- Safe configuration-only function/trigger verification (no records).
+select p.oid::regprocedure, p.proconfig,
+  has_function_privilege('anon',p.oid,'EXECUTE') as anonymous_execute,
+  has_function_privilege('authenticated',p.oid,'EXECUTE') as authenticated_execute
+from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+where n.nspname='public' and p.proname in ('_clinic_schedule_slots','get_available_appointment_slots',
+  'get_available_appointment_dates','_guard_doctor_calendar_change','staff_block_doctor_date',
+  'ensure_patient_identity','admin_link_patient');
 
--- select * from patient_visit_notes limit 1;
--- EXPECTED: 0 rows (staff-only table).
+-- Existing blocked-day conflicts are retained by the migration, never cancelled.
+-- An authorized administrator may privately review these aggregate counts.
+select u.doctor_id, u.date, count(*) as conflicting_appointments
+from public.doctor_unavailable_dates u join public.appointments a
+  on a.doctor_id=u.doctor_id and (a.scheduled_time at time zone 'Asia/Manila')::date=u.date
+where a.status not in ('cancelled','no_show') group by u.doctor_id,u.date order by u.date;
 
--- select * from audit_log limit 1;
--- EXPECTED: 0 rows (admin-read-only).
-
--- select * from profiles;
--- EXPECTED: exactly 1 row — the patient's own profile (select_own only)
-
--- 3) DOUBLE-BOOKING rejection (run as admin):
--- Pick a real doctor id + timestamp, then run the same INSERT twice
--- with status='scheduled'. Second INSERT must fail with
--- "duplicate key value violates unique constraint uq_doctor_slot".
---
--- insert into appointments (patient_id, doctor_id, scheduled_time, source, status)
--- values ('<PATIENT_UUID>', '<DOCTOR_UUID>', '2026-10-06T02:00:00+00', 'pre_booked', 'scheduled');
--- -- run identical insert again -> MUST FAIL
---
--- Cancelled slots are reusable (constraint excludes them):
--- update appointments set status='cancelled' where id='<FIRST_ID>';
--- -- identical insert again -> MUST SUCCEED
-
--- 4) BOOKING RPCs (run as patient@gmail.com):
--- select book_appointment('<ACTIVE_DOCTOR_UUID>', now() + interval '2 days', 'checkup');
--- EXPECTED: {"success": true, ...} ONLY if that instant lands on the
--- doctor's schedule grid — otherwise a friendly exception
--- ("...not available...", "already been booked...").
---
--- Double-book guard: call book_appointment twice for the same slot.
--- Second call MUST raise 'already been booked'.
---
--- Ownership: reschedule/cancel of ANOTHER patient's id MUST raise
--- 'Appointment not found.'
--- select reschedule_appointment('<OWN_ID>', '<DOCTOR_UUID>', now() + interval '3 days');
--- select cancel_appointment('<OWN_ID>');
-
--- 5) AUDIT trigger check (run as admin):
--- update appointments set status='checked_in' where id='<ID>' and status='scheduled';
--- select action, entity, old_value->>'status', new_value->>'status', created_at
--- from audit_log where entity_id='<ID>' order by created_at desc limit 5;
--- EXPECTED: rows with action='status_change' (or 'cancel'/'reschedule' as
--- appropriate). As patient, SELECT on audit_log returns 0 rows
--- (admin-only read) — that is correct.
+-- Global whole-minute appointment constraint and safe legacy-data count.
+select conname, convalidated, pg_get_constraintdef(oid) from pg_constraint
+where conrelid='public.appointments'::regclass and conname='phase2_appointment_minute_check';
+select count(*) as invalid_appointment_timestamp_count from public.appointments
+where not isfinite(scheduled_time) or extract(second from scheduled_time at time zone 'Asia/Manila')<>0;

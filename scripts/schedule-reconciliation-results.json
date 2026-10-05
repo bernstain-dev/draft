@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-10-02T17:20:50.688Z",
+  "boundary": "Disposable synthetic loopback PostgreSQL only; no hosted execution",
+  "checks": [
+    {
+      "name": "Existing six overlap pairs abort Phase 2 unchanged",
+      "result": "PASS"
+    },
+    {
+      "name": "Changed keeper aborts without deleting schedules",
+      "result": "PASS"
+    },
+    {
+      "name": "Unexpected referencing table aborts rather than cascading",
+      "result": "PASS"
+    },
+    {
+      "name": "Exact cleanup privately archives three rows and preserves keeper, slot grid, unrelated schedules and every clinical row",
+      "result": "PASS"
+    },
+    {
+      "name": "Repeated cleanup is harmless; Phase 2 then Phase 3 install and preserve all clinical rows",
+      "result": "PASS"
+    }
+  ]
+}

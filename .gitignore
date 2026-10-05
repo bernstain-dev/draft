@@ -2,3 +2,6 @@ node_modules/
 dist/
 .env
 .env.local
+secret.txt
+.env.*
+!.env.example

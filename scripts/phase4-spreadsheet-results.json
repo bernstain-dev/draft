@@ -1,0 +1,10 @@
+{
+  "Application": "Microsoft Excel",
+  "Import": "Normal CSV open; read-only",
+  "SyntheticOnly": true,
+  "Rows": 9,
+  "Columns": 1,
+  "AnyFormula": false,
+  "UnicodePreserved": true,
+  "QuotesCommaNewlinePreserved": true
+}

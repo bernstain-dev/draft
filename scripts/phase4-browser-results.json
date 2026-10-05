@@ -1,0 +1,110 @@
+{
+  "timestamp": "2026-10-02T16:41:01.201Z",
+  "boundary": "Actual built React/SDK; Auth/REST mocked, all non-loopback HTTP intercepted and remote WebSockets replaced; hosted E2E NOT VERIFIED",
+  "remoteRequestsIntercepted": 282,
+  "frontendCredentialRoleCategories": [
+    "anon"
+  ],
+  "checks": [
+    {
+      "browser": "Chrome",
+      "name": "root/anonymous protected routes redirect to correct portal login",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "wrong password visible; patient signup, provisioning and dashboard render",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient direct refresh routes render with restored real SDK session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient doctor/date/slot/book → list → reschedule → cancel → history",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient query error/retry and failed identity are explicit rather than indefinite/empty",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient session alone cannot access staff; independent admin login restores staff routes",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "separate SDK storage keys coexist; admin logout preserves patient session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "wrong-role restored sessions fail closed in both portals; patient logout and login again work",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "clinic appointment display identical under Manila/UTC/New York browser timezones",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "mobile viewport login/patient/booking and invalid nested route behavior",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "root/anonymous protected routes redirect to correct portal login",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "wrong password visible; patient signup, provisioning and dashboard render",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient direct refresh routes render with restored real SDK session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient doctor/date/slot/book → list → reschedule → cancel → history",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient query error/retry and failed identity are explicit rather than indefinite/empty",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient session alone cannot access staff; independent admin login restores staff routes",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "separate SDK storage keys coexist; admin logout preserves patient session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "wrong-role restored sessions fail closed in both portals; patient logout and login again work",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "clinic appointment display identical under Manila/UTC/New York browser timezones",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "mobile viewport login/patient/booking and invalid nested route behavior",
+      "result": "PASS"
+    }
+  ]
+}

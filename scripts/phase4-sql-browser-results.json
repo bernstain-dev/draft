@@ -1,0 +1,198 @@
+{
+  "timestamp": "2026-10-03T11:06:39.315Z",
+  "boundary": "Actual built React/SDK and real disposable PostgreSQL RPC/ACL/RLS; Auth synthetic, REST translated locally (NOT GoTrue/PostgREST), all non-loopback HTTP intercepted and remote WebSockets replaced; hosted E2E NOT VERIFIED",
+  "remoteRequestsIntercepted": 561,
+  "frontendCredentialRoleCategories": [
+    "anon"
+  ],
+  "checks": [
+    {
+      "browser": "Chrome",
+      "name": "root/anonymous protected routes redirect to correct portal login",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "wrong password visible; patient signup, provisioning and dashboard render",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient direct refresh routes render with restored real SDK session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient doctor/date/slot/book → list → reschedule → cancel → history",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient query error/retry and failed identity are explicit rather than indefinite/empty",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient session alone cannot access staff; independent admin login restores staff routes",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "patient demographic save persists through SQL and refresh",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "staff creates, searches and edits a clinic patient with SQL persistence",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "staff doctor create/edit/activate and working-hour/block CRUD persists through SQL",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "staff books, moves and cancels through protected SQL RPCs",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "staff check-in, waiting, room, completion and visit note persist with audit",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "staff Dashboard/Reports real SQL totals, audit, CSV and Retry recover",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "separate SDK storage keys coexist; admin logout preserves patient session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "wrong-role restored sessions fail closed in both portals; patient logout and login again work",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "clinic appointment display identical under Manila/UTC/New York browser timezones",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "mobile viewport login/patient/booking and invalid nested route behavior",
+      "result": "PASS"
+    },
+    {
+      "browser": "Chrome",
+      "name": "Business data persisted in disposable local PostgreSQL",
+      "result": "PASS",
+      "sqlStatements": 187
+    },
+    {
+      "browser": "Edge",
+      "name": "root/anonymous protected routes redirect to correct portal login",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "wrong password visible; patient signup, provisioning and dashboard render",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient direct refresh routes render with restored real SDK session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient doctor/date/slot/book → list → reschedule → cancel → history",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient query error/retry and failed identity are explicit rather than indefinite/empty",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient session alone cannot access staff; independent admin login restores staff routes",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "patient demographic save persists through SQL and refresh",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "staff creates, searches and edits a clinic patient with SQL persistence",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "staff doctor create/edit/activate and working-hour/block CRUD persists through SQL",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "staff books, moves and cancels through protected SQL RPCs",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "staff check-in, waiting, room, completion and visit note persist with audit",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "staff Dashboard/Reports real SQL totals, audit, CSV and Retry recover",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "separate SDK storage keys coexist; admin logout preserves patient session",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "wrong-role restored sessions fail closed in both portals; patient logout and login again work",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "clinic appointment display identical under Manila/UTC/New York browser timezones",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "mobile viewport login/patient/booking and invalid nested route behavior",
+      "result": "PASS"
+    },
+    {
+      "browser": "Edge",
+      "name": "Business data persisted in disposable local PostgreSQL",
+      "result": "PASS",
+      "sqlStatements": 187
+    }
+  ],
+  "observations": [
+    {
+      "severity": "LOW",
+      "status": "STILL BROKEN",
+      "finding": "Patient profile success message disappears during identity refresh; SQL save and refreshed fields succeed",
+      "boundary": "Actual local browser/SQL; synthetic Auth",
+      "scope": "Documented; no unrelated UI change"
+    },
+    {
+      "severity": "LOW",
+      "status": "STILL BROKEN",
+      "finding": "Patient profile success message disappears during identity refresh; SQL save and refreshed fields succeed",
+      "boundary": "Actual local browser/SQL; synthetic Auth",
+      "scope": "Documented; no unrelated UI change"
+    }
+  ]
+}

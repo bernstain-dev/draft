@@ -1,0 +1,41 @@
+{
+  "timestamp": "2026-10-03T10:48:57.682Z",
+  "boundary": "Read-only categorical current-file scan; no values, validity, history or hosted accounts verified",
+  "files": {
+    ".env": {
+      "present": true,
+      "tracked": false,
+      "jwtRoleCategories": [
+        "anon"
+      ],
+      "privilegedFrontendVariableNames": [],
+      "valuesOmitted": true
+    },
+    "secret.txt": {
+      "present": true,
+      "tracked": true,
+      "jwtRoleCategories": [
+        "anon"
+      ],
+      "privilegedFrontendVariableNames": [],
+      "valuesOmitted": true
+    },
+    ".env.example": {
+      "present": true,
+      "tracked": true,
+      "jwtRoleCategories": [],
+      "privilegedFrontendVariableNames": [],
+      "valuesOmitted": true
+    }
+  },
+  "demoSQLPresent": [
+    "supabase/full.sql",
+    "supabase/full_demo.sql",
+    "supabase/demo_data.sql"
+  ],
+  "demoSQLBoundary": "Disposable demo targets only; not hosted upgrades; credentials omitted",
+  "seedLoopbackGuard": true,
+  "stagingAvailable": false,
+  "dockerAvailable": false,
+  "supabaseCliWorking": false
+}

@@ -1,41 +1,39 @@
+import { CalendarDays, CalendarPlus, ChevronDown, ChevronUp } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { notifyAppointment } from '../../lib/notifications';
+import { useMutation } from '../../lib/useMutation';
+import QueryState from '../../components/QueryState';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
+import { appointmentMutationSucceeded } from '../../lib/appointmentChanges';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { getPatientClient, usePatientAuth } from './auth/patientAuth';
 import type { Appointment, Doctor } from '../../lib/types';
-import { MSG, formatDateShort, formatTime, patientStatusLabel, patientStatusPill } from '../../lib/patient';
-import { isMissingRpc } from '../../lib/patientRpc';
+import { formatDateShort, formatTime, patientStatusLabel, patientStatusPill } from '../../lib/patient';
 
 interface Row extends Appointment {
   doctor?: Doctor | null;
 }
 
-const UPCOMING = ['pending', 'scheduled', 'confirmed', 'checked_in', 'waiting', 'in_progress'];
+const UPCOMING = ['pending', 'scheduled', 'checked_in', 'waiting', 'in_progress'];
 
 export default function MyAppointments() {
   const sb = getPatientClient();
   const { patient } = usePatientAuth();
   const nav = useNavigate();
-  const [rows, setRows] = useState<Row[]>([]);
+  const revision = useAppointmentRevision();
   const [msg, setMsg] = useState<string | null>(null);
   const [expanded, setExpanded] = useState('');
   const [busyId, setBusyId] = useState('');
+  const mutation = useMutation(setMsg);
 
-  async function load() {
-    if (!patient) return;
-    const { data, error } = await sb
-      .from('appointments')
-      .select('*, doctor:doctors(*)')
-      .eq('patient_id', patient.id)
-      .in('status', UPCOMING)
-      .order('scheduled_time');
-    if (error) setMsg(error.message);
-    else setRows((data as Row[]) ?? []);
-  }
-
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patient?.id]);
+  const list = useClinicQuery<Row[]>(patient ? `${patient.id}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.from('appointments').select('*, doctor:doctors(*)')
+      .eq('patient_id', patient!.id).in('status', UPCOMING).order('scheduled_time').abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return (data as Row[]) ?? [];
+  }, []);
+  const rows = list.data;
 
   const sorted = useMemo(
     () => [...rows].sort((a, b) => +new Date(a.scheduled_time) - +new Date(b.scheduled_time)),
@@ -43,29 +41,22 @@ export default function MyAppointments() {
   );
 
   async function cancelAppointment(id: string) {
-    if (!confirm('Cancel this appointment?')) return;
-    setBusyId(id);
-    setMsg(null);
-    try {
-      const rpc = await sb.rpc('cancel_appointment', { p_appointment_id: id });
-      if (rpc.error) {
-        // Show real validation errors as-is; direct update is only a
-        // fallback for databases where the RPC isn't deployed yet.
-        if (!isMissingRpc(rpc.error)) {
+    await mutation.run(async () => {
+      if (!confirm('Cancel this appointment?')) return;
+      setBusyId(id);
+      setMsg(null);
+      try {
+        const rpc = await sb.rpc('cancel_appointment', { p_appointment_id: id });
+        if (rpc.error) {
           setMsg(rpc.error.message);
           return;
         }
-        const { error } = await sb.from('appointments').update({ status: 'cancelled' }).eq('id', id);
-        if (error) {
-          setMsg(`${MSG.failure} (${error.message})`);
-          return;
-        }
+        if (!appointmentMutationSucceeded(rpc)) { setMsg('Cancellation could not be confirmed.'); return; }
+        setMsg('Your appointment has been cancelled.' + await notifyAppointment(sb, id, 'cancellation'));
+      } finally {
+        setBusyId('');
       }
-      setRows((r) => r.filter((x) => x.id !== id));
-      setMsg('Your appointment has been cancelled.');
-    } finally {
-      setBusyId('');
-    }
+    });
   }
 
   if (!patient) {
@@ -76,6 +67,7 @@ export default function MyAppointments() {
     );
   }
 
+  if (list.loading || list.error) return <QueryState query={list} label="appointments" />;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -83,16 +75,16 @@ export default function MyAppointments() {
           <h1 className="text-2xl font-bold">My Appointments</h1>
           <p className="text-sm text-slate-400">View, reschedule, or cancel your upcoming visits.</p>
         </div>
-        <Link className="dk-btn-primary" to="/patient/book">
-          + Book an Appointment
+        <Link className="icon-button dk-btn-primary" to="/patient/book">
+          <AppIcon icon={CalendarPlus} size={17} />Book an Appointment
         </Link>
       </div>
 
-      {msg && <p role="status" className="text-sm text-slate-300">{msg}</p>}
+      {(msg || list.error) && <p role="status" className="text-sm text-slate-300">{list.error || msg}</p>}
 
       {sorted.length === 0 ? (
         <div className="dk-panel mx-auto max-w-md space-y-2 py-10 text-center">
-          <p className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/5 text-2xl">📅</p>
+          <p className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/5 text-2xl"><AppIcon icon={CalendarDays} size={24} /></p>
           <h2 className="text-lg font-semibold">No Appointments Yet</h2>
           <p className="text-sm text-slate-400">You don&apos;t have any scheduled appointments yet.</p>
           <Link to="/patient/book" className="dk-btn-primary mt-2 inline-block">
@@ -127,16 +119,16 @@ export default function MyAppointments() {
                   </dl>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className="dk-btn-ghost flex-1" onClick={() => setExpanded((v) => (v === a.id ? '' : a.id))}>
-                    {open ? 'Hide Details' : 'View Details'}
+                  <button type="button" className="icon-button dk-btn-ghost flex-1" onClick={() => setExpanded((v) => (v === a.id ? '' : a.id))}>
+                    <AppIcon icon={open ? ChevronUp : ChevronDown} size={16} />{open ? 'Hide Details' : 'View Details'}
                   </button>
-                  <button type="button" className="dk-btn-ghost flex-1" onClick={() => nav(`/patient/book?reschedule=${a.id}`)}>
-                    Reschedule
+                  <button type="button" className="icon-button dk-btn-ghost flex-1" disabled={!['pending', 'scheduled'].includes(a.status)} onClick={() => nav(`/patient/book?reschedule=${a.id}`)}>
+                    <AppIcon icon={CalendarDays} size={16} />Reschedule
                   </button>
                   <button
                     type="button"
                     className="dk-btn-danger flex-1"
-                    disabled={busyId === a.id}
+                    disabled={mutation.pending || busyId === a.id || !['pending', 'scheduled'].includes(a.status)}
                     onClick={() => void cancelAppointment(a.id)}
                   >
                     {busyId === a.id ? 'Cancelling…' : 'Cancel Appointment'}

@@ -1,0 +1,102 @@
+{
+  "timestamp": "2026-10-02T16:36:12.510Z",
+  "command": "npm audit --json",
+  "exitCode": 1,
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 3,
+    "high": 1,
+    "critical": 0,
+    "total": 4
+  },
+  "packages": [
+    {
+      "name": "esbuild",
+      "severity": "moderate",
+      "direct": false,
+      "range": "<=0.24.2",
+      "advisories": [
+        {
+          "title": "esbuild enables any website to send any requests to the development server and read the response",
+          "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99",
+          "severity": "moderate",
+          "range": "<=0.24.2"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite",
+        "version": "8.3.2",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "react-router",
+      "severity": "moderate",
+      "direct": false,
+      "range": "6.0.0 - 7.17.0",
+      "advisories": [
+        {
+          "title": "React Router: Open redirect via backslash in <Link> and useNavigate (CVE-2025-68470 bypass)",
+          "url": "https://github.com/advisories/GHSA-wrjc-x8rr-h8h6",
+          "severity": "moderate",
+          "range": ">=6.0.0 <7.18.0"
+        },
+        {
+          "title": "React Router: Arbitrary Constructor Injection via deserializeErrors() in React Router SSR Hydration",
+          "url": "https://github.com/advisories/GHSA-337j-9hxr-rhxg",
+          "severity": "moderate",
+          "range": ">=6.4.0 <7.18.0"
+        }
+      ],
+      "fixAvailable": {
+        "name": "react-router-dom",
+        "version": "7.18.4",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "react-router-dom",
+      "severity": "moderate",
+      "direct": true,
+      "range": "6.0.0-alpha.0 - 7.17.0",
+      "advisories": [],
+      "fixAvailable": {
+        "name": "react-router-dom",
+        "version": "7.18.4",
+        "isSemVerMajor": true
+      }
+    },
+    {
+      "name": "vite",
+      "severity": "high",
+      "direct": true,
+      "range": "<=6.4.2",
+      "advisories": [
+        {
+          "title": "Vite Vulnerable to Path Traversal in Optimized Deps `.map` Handling",
+          "url": "https://github.com/advisories/GHSA-4w7w-66w2-5vf9",
+          "severity": "moderate",
+          "range": "<=6.4.1"
+        },
+        {
+          "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+          "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+          "severity": "moderate",
+          "range": "<=6.4.2"
+        },
+        {
+          "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+          "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+          "severity": "high",
+          "range": "<=6.4.2"
+        }
+      ],
+      "fixAvailable": {
+        "name": "vite",
+        "version": "8.3.2",
+        "isSemVerMajor": true
+      }
+    }
+  ]
+}

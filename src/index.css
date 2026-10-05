@@ -66,6 +66,168 @@ body {
   @apply px-3 py-2.5 text-sm;
 }
 
+.app-icon {
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.icon-button,
+.icon-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.icon-button {
+  justify-content: center;
+}
+
+/* Shared sidebar proportions for the staff and patient portals. */
+.portal-sidebar {
+  padding: 0 12px 12px;
+}
+.portal-sidebar--desktop {
+  width: 216px;
+}
+.portal-sidebar--collapsed {
+  width: 72px;
+}
+.portal-sidebar-header {
+  display: flex;
+  height: 72px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+}
+.portal-brand-icon {
+  display: flex;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+}
+.portal-brand-text {
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+.portal-menu-button {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+.portal-menu-button svg {
+  width: 22px;
+  height: 22px;
+}
+.portal-sidebar--collapsed .portal-sidebar-header {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+}
+.portal-sidebar--collapsed .portal-brand-icon {
+  width: 28px;
+  height: 28px;
+}
+.portal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 10px;
+}
+.portal-nav-link,
+.portal-signout {
+  display: flex;
+  width: 100%;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 12px;
+  border-radius: 9px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.portal-nav-link {
+  height: 48px;
+}
+.portal-nav-link[aria-current='page'] {
+  font-weight: 600;
+}
+.portal-nav-icon {
+  display: flex;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+}
+.portal-sidebar--collapsed .portal-nav-link,
+.portal-sidebar--collapsed .portal-signout {
+  justify-content: center;
+  padding-right: 0;
+  padding-left: 0;
+}
+.portal-account {
+  margin-top: auto;
+  padding-top: 16px;
+}
+.portal-account-card {
+  border-radius: 9px;
+  padding: 13px;
+}
+.portal-account-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.portal-account-role {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.portal-account-avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+}
+.portal-signout {
+  height: 44px;
+  margin-top: 4px;
+}
+.portal-signout .portal-nav-icon {
+  font-size: 18px;
+}
+.portal-sidebar--mobile {
+  width: min(256px, calc(100vw - 24px));
+}
+.portal-mobile-header {
+  height: 64px;
+  padding-right: 18px;
+  padding-left: 18px;
+}
+.portal-mobile-page {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (min-width: 1024px) {
+  .portal-sidebar--desktop:not(.portal-sidebar--collapsed) {
+    width: 232px;
+  }
+}
+
 /* Light mode: ThemeProvider sets <html data-theme="light">. Only staff
    and patient surfaces flip (they live under .staff-dark). */
 [data-theme='light'] .staff-dark {

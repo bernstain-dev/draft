@@ -1,3 +1,9 @@
+import { Bell, LockKeyhole, Moon, RefreshCw, Sun } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { useClinicQuery } from '../../lib/useClinicQuery';
+import { useMutation } from '../../lib/useMutation';
+import { textError } from '../../lib/formValidation';
+import QueryState from '../../components/QueryState';
 import { useEffect, useState } from 'react';
 import { getStaffClient, useStaffAuth } from './auth/staffAuth';
 import { useTheme } from '../../lib/theme';
@@ -8,64 +14,77 @@ const ROLES = ['admin', 'patient'];
 
 export default function Settings() {
   const sb = getStaffClient();
-  const { user, profile, role } = useStaffAuth();
+  const { user, profile, role, refreshIdentity } = useStaffAuth();
   const { theme, setTheme } = useTheme();
   const [name, setName] = useState(profile?.full_name ?? '');
   const [pw1, setPw1] = useState('');
   const [pw2, setPw2] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  const [users, setUsers] = useState<Profile[]>([]);
+  const mutation = useMutation(setMsg);
+  const [userRevision, setUserRevision] = useState(0);
   const isAdmin = role === 'admin';
   const notifyOn = (import.meta.env.VITE_NOTIFY_ENABLED as string | undefined) === 'true';
 
-  async function loadUsers() {
-    if (!isAdmin) return;
-    const { data, error } = await sb.from('profiles').select('*').order('full_name');
-    if (!error) setUsers((data as Profile[]) ?? []);
-  }
-
-  useEffect(() => {
-    void loadUsers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin]);
+  const list = useClinicQuery<Profile[]>(isAdmin ? `${user?.id}/${userRevision}` : '', async signal => {
+    const { data, error } = await sb.from('profiles').select('*').order('full_name').abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return data as Profile[] ?? [];
+  }, []);
+  const users = list.data;
+  const notificationQuery = useClinicQuery<{ id: string; notification_type: string; status: string; delivery_status: string; attempt_count: number }[]>(isAdmin ? `notification-status/${user?.id}/${userRevision}` : '', async signal => {
+    const { data, error } = await sb.from('notification_attempts').select('id,notification_type,status,delivery_status,attempt_count').order('created_at', { ascending: false }).limit(50).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }, []);
+  useEffect(() => setName(profile?.full_name ?? ''), [profile?.full_name]);
 
   async function saveName(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || !name.trim()) return;
-    const { error } = await sb.from('profiles').update({ full_name: name.trim() }).eq('id', user.id);
-    if (error) setMsg(error.message);
-    else {
-      setMsg('Display name saved — reloading…');
-      setTimeout(() => window.location.reload(), 800);
-    }
+    await mutation.run(async () => {
+      if (!user) return;
+      const validation = textError(name, 'Display name', 300, true);
+      if (validation) { setMsg(validation); return; }
+      const { data, error } = await sb.from('profiles').update({ full_name: name.trim() }).eq('id', user.id).select('id').single();
+      if (error) setMsg(error.message);
+      else {
+        if (!data) { setMsg('Display-name save could not be confirmed.'); return; }
+        setMsg('Display name saved.'); await refreshIdentity();
+      }
+    });
   }
 
   async function savePassword(e: React.FormEvent) {
     e.preventDefault();
-    if (pw1.length < 6) {
-      setMsg('Password must be at least 6 characters.');
-      return;
-    }
-    if (pw1 !== pw2) {
-      setMsg('Passwords do not match.');
-      return;
-    }
-    const { error } = await sb.auth.updateUser({ password: pw1 });
-    if (error) setMsg(error.message);
-    else {
-      setMsg('Password changed ✓');
-      setPw1('');
-      setPw2('');
-    }
+    await mutation.run(async () => {
+      if (pw1.length < 8) {
+        setMsg('Password must be at least 8 characters.');
+        return;
+      }
+      if (pw1 !== pw2) {
+        setMsg('Passwords do not match.');
+        return;
+      }
+      const { error } = await sb.auth.updateUser({ password: pw1 });
+      if (error) setMsg(error.message);
+      else {
+        setMsg('Password changed.');
+        setPw1('');
+        setPw2('');
+      }
+    });
   }
 
   async function setRole(id: string, next: string) {
-    const { error } = await sb.from('profiles').update({ role: next }).eq('id', id);
-    if (error) setMsg(error.message);
-    else {
-      setMsg('Role updated.');
-      setUsers(users.map((u) => (u.id === id ? { ...u, role: next } : u)));
-    }
+    await mutation.run(async () => {
+      if (!isAdmin || id === user?.id || !ROLES.includes(next)) { setMsg('Invalid role change.'); return; }
+      const { data, error } = await sb.rpc('admin_set_profile_role', { p_profile_id: id, p_role: next });
+      if (error) setMsg(error.message);
+      else {
+        setMsg('Role updated.');
+        if (!data?.success) { setMsg('Role update could not be confirmed.'); return; }
+        setUserRevision(r => r + 1);
+      }
+    });
   }
 
   return (
@@ -81,7 +100,7 @@ export default function Settings() {
               {theme === 'dark' ? 'Dark mode.' : 'Light mode.'} Applies to the staff section instantly and is remembered on this device.
             </p>
           </div>
-          <button
+          <button disabled={mutation.pending}
             type="button"
             role="switch"
             aria-checked={theme === 'dark'}
@@ -94,16 +113,11 @@ export default function Settings() {
           >
             {/* moon = dark, left */}
             <span className={`absolute left-2 top-1/2 -translate-y-1/2 ${theme === 'dark' ? 'text-white' : 'text-[#0e4a3a]/40'}`}>
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden>
-                <path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z" />
-              </svg>
+              <AppIcon icon={Moon} size={16} />
             </span>
             {/* sun = light, right */}
             <span className={`absolute right-2 top-1/2 -translate-y-1/2 ${theme === 'dark' ? 'text-white/40' : 'text-amber-500'}`}>
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-              </svg>
+              <AppIcon icon={Sun} size={16} />
             </span>
             <span
               className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all duration-200 ${
@@ -122,13 +136,13 @@ export default function Settings() {
             <label className="mb-1 block text-xs text-slate-500">Display name</label>
             <input className="dk-input" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <button className="dk-btn-primary" type="submit">Save name</button>
+          <button disabled={mutation.pending} className="dk-btn-primary" type="submit">Save name</button>
         </form>
 
         <form onSubmit={savePassword} className="dk-panel space-y-3">
           <h2 className="font-semibold">Change password</h2>
           <div>
-            <label className="mb-1 block text-xs text-slate-500">New password (min 6 chars)</label>
+            <label className="mb-1 block text-xs text-slate-500 icon-label"><AppIcon icon={LockKeyhole} size={16} />New password (min 8 chars)</label>
             <PasswordInput
               className="dk-input"
               toggleClassName="text-slate-400 hover:text-slate-200"
@@ -139,7 +153,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-slate-500">Confirm password</label>
+            <label className="mb-1 block text-xs text-slate-500 icon-label"><AppIcon icon={LockKeyhole} size={16} />Confirm password</label>
             <PasswordInput
               className="dk-input"
               toggleClassName="text-slate-400 hover:text-slate-200"
@@ -149,29 +163,36 @@ export default function Settings() {
               required
             />
           </div>
-          <button className="dk-btn-primary" type="submit">Change password</button>
+          <button disabled={mutation.pending} className="dk-btn-primary" type="submit">Change password</button>
         </form>
       </div>
 
       <div className="dk-panel">
-        <h2 className="font-semibold">Notifications</h2>
+        <h2 className="font-semibold"><AppIcon icon={Bell} size={18} /> Notifications</h2>
         <p className="mt-1 text-sm text-slate-400">
-          Appointment confirmations via Edge Function:{' '}
+          Immediate notification requests:{' '}
           <span className={notifyOn ? 'font-semibold text-green-400' : 'font-semibold text-slate-500'}>
             {notifyOn ? 'ON' : 'OFF'}
           </span>
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          Controlled by the VITE_NOTIFY_ENABLED build flag (.env). Set it to 'true' only after deploying
-          the send-confirmation function, then restart the dev server.
+          Browser invocation is controlled by deployment configuration. Provider acceptance and delivery remain separate; the durable worker handles queued notices independently.
         </p>
+        <button className="dk-btn-ghost icon-button mt-2" onClick={() => setUserRevision(r => r + 1)}><AppIcon icon={RefreshCw} size={17} />Refresh notification status</button>
+        <QueryState query={notificationQuery} label="notification status" />
+        {!notificationQuery.loading && !notificationQuery.error && <div className="mt-2 text-xs">
+          <p>Most recent 50 attempts. Accepted is not proof of delivery. Unknown attempts require provider review before any resend.</p>
+          {notificationQuery.data.map(n => <p key={n.id}>{n.notification_type} · {n.status} · delivery: {n.delivery_status} · attempts: {n.attempt_count}</p>)}
+          {!notificationQuery.data.length && <p>No notification attempts recorded.</p>}
+        </div>}
       </div>
 
       {isAdmin ? (
         <div className="dk-panel">
           <h2 className="font-semibold">User roles (admin)</h2>
+          <QueryState query={list} label="users" />
           <p className="mt-1 text-xs text-slate-500">
-            New logins are created via Supabase Auth or seed.cjs — role changes happen here.
+            Create real accounts through Supabase Auth. Role changes use an authorized admin operation; demonstration seeders are local-only.
             Patient accounts use role <span className="font-semibold">patient</span>.
           </p>
           <div className="mt-2 divide-y divide-white/5">
@@ -182,7 +203,7 @@ export default function Settings() {
                 <select
                   className="dk-input ml-auto max-w-[160px]"
                   value={u.role}
-                  disabled={u.id === user?.id}
+                  disabled={mutation.pending || u.id === user?.id}
                   title={u.id === user?.id ? 'You cannot change your own role' : 'Change role'}
                   onChange={(e) => void setRole(u.id, e.target.value)}
                 >
@@ -190,7 +211,7 @@ export default function Settings() {
                 </select>
               </div>
             ))}
-            {users.length === 0 && <p className="py-2 text-sm text-slate-500">No users found.</p>}
+            {!list.loading && !list.error && users.length === 0 && <p className="py-2 text-sm text-slate-500">No users found.</p>}
           </div>
         </div>
       ) : (

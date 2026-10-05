@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-10-03T11:02:42.769Z",
+  "environment": "Disposable loopback PostgreSQL; synthetic auth.uid shim; mocked provider; no hosted access",
+  "checks": [
+    {
+      "name": "Complete fresh schema executes; ten tables, RLS, index, triggers and required public RPCs exist",
+      "result": "PASS"
+    },
+    {
+      "name": "Synthetic complete pre-upgrade database survives Phase 1 → 2 → 3 → read-only report fix with UUID/history/roles/notes/audit/index OID unchanged",
+      "result": "PASS"
+    },
+    {
+      "name": "Incrementally upgraded database authorizes both STABLE reports in read-only transactions while denying patient/anonymous/private-helper access",
+      "result": "PASS"
+    },
+    {
+      "name": "Incompatible zero-duration, overlapping and invalid demographic fixtures fail safely without deleting/rewriting rows",
+      "result": "PASS"
+    },
+    {
+      "name": "Anonymous cannot read patient/private appointment tables, mutate appointments or execute private/admin/booking RPCs",
+      "result": "PASS"
+    },
+    {
+      "name": "Patient own reads and operations work; patient B data/mutations, clinical writes, staff booking, reports and ledger are denied",
+      "result": "PASS"
+    },
+    {
+      "name": "Role escalation fails for UPDATE, INSERT, UPSERT, admin RPC, malformed UUID, extra RPC arguments and forged metadata",
+      "result": "PASS"
+    },
+    {
+      "name": "Five concurrency combinations yield exactly one winner under the shared exact-slot rule",
+      "result": "PASS"
+    },
+    {
+      "name": "09:00:00 valid; seconds/fractions/off-grid rejected; cancelled and no-show slots released",
+      "result": "PASS"
+    },
+    {
+      "name": "Patient/staff availability is identical and private; inactive/blocked/full/completed/past rules apply",
+      "result": "PASS"
+    },
+    {
+      "name": "Admin clinical progression works; terminal revival, future check-in and skipped transitions are rejected",
+      "result": "PASS"
+    },
+    {
+      "name": "Real notification handlers use actual local ledger; duplicate send, 400/429/500/timeout and persistence behavior are correct",
+      "result": "PASS"
+    },
+    {
+      "name": "CSV neutralizes formulas/leading whitespace while preserving Unicode/quotes/commas/newlines",
+      "result": "PASS"
+    }
+  ]
+}

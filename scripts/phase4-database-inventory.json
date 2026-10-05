@@ -1,0 +1,817 @@
+{
+  "tables": [
+    "appointment_notification_versions",
+    "appointments",
+    "audit_log",
+    "doctor_schedules",
+    "doctor_unavailable_dates",
+    "doctors",
+    "notification_attempts",
+    "patient_visit_notes",
+    "patients",
+    "profiles"
+  ],
+  "indexes": [
+    "appointment_notification_versions_pkey",
+    "appointments_pkey",
+    "audit_log_pkey",
+    "doctor_schedules_pkey",
+    "doctor_unavailable_dates_doctor_id_date_key",
+    "doctor_unavailable_dates_pkey",
+    "doctors_pkey",
+    "idx_appts_doctor_time",
+    "idx_appts_patient",
+    "idx_appts_sched_time",
+    "idx_appts_status",
+    "idx_audit_actor",
+    "idx_audit_entity",
+    "idx_notes_appointment",
+    "idx_notes_patient",
+    "idx_patients_contact",
+    "idx_patients_name",
+    "notification_attempts_appointment_id_notification_type_revi_key",
+    "notification_attempts_pkey",
+    "patient_visit_notes_pkey",
+    "patients_pkey",
+    "phase2_schedule_no_overlap",
+    "phase3_notification_provider_reference",
+    "phase3_notifications_due",
+    "profiles_pkey",
+    "uq_doctor_slot",
+    "uq_patients_user"
+  ],
+  "policies": [
+    {
+      "name": "patient_select_own_appointments",
+      "table": "appointments",
+      "command": "SELECT"
+    },
+    {
+      "name": "staff_select_appointments",
+      "table": "appointments",
+      "command": "SELECT"
+    },
+    {
+      "name": "audit_admin_select",
+      "table": "audit_log",
+      "command": "SELECT"
+    },
+    {
+      "name": "audit_staff_insert",
+      "table": "audit_log",
+      "command": "INSERT"
+    },
+    {
+      "name": "patient_read_schedules",
+      "table": "doctor_schedules",
+      "command": "SELECT"
+    },
+    {
+      "name": "staff_all_schedules",
+      "table": "doctor_schedules",
+      "command": "ALL"
+    },
+    {
+      "name": "patient_read_unavailable",
+      "table": "doctor_unavailable_dates",
+      "command": "SELECT"
+    },
+    {
+      "name": "staff_all_unavailable",
+      "table": "doctor_unavailable_dates",
+      "command": "ALL"
+    },
+    {
+      "name": "patient_read_doctors",
+      "table": "doctors",
+      "command": "SELECT"
+    },
+    {
+      "name": "staff_all_doctors",
+      "table": "doctors",
+      "command": "ALL"
+    },
+    {
+      "name": "notifications_admin_read",
+      "table": "notification_attempts",
+      "command": "SELECT"
+    },
+    {
+      "name": "staff_all_notes",
+      "table": "patient_visit_notes",
+      "command": "ALL"
+    },
+    {
+      "name": "patient_insert_own",
+      "table": "patients",
+      "command": "INSERT"
+    },
+    {
+      "name": "patient_select_own",
+      "table": "patients",
+      "command": "SELECT"
+    },
+    {
+      "name": "patient_update_own",
+      "table": "patients",
+      "command": "UPDATE"
+    },
+    {
+      "name": "staff_all_patients",
+      "table": "patients",
+      "command": "ALL"
+    },
+    {
+      "name": "profiles_admin_select",
+      "table": "profiles",
+      "command": "SELECT"
+    },
+    {
+      "name": "profiles_admin_update",
+      "table": "profiles",
+      "command": "UPDATE"
+    },
+    {
+      "name": "profiles_insert_own",
+      "table": "profiles",
+      "command": "INSERT"
+    },
+    {
+      "name": "profiles_select_own",
+      "table": "profiles",
+      "command": "SELECT"
+    },
+    {
+      "name": "profiles_update_own",
+      "table": "profiles",
+      "command": "UPDATE"
+    }
+  ],
+  "triggers": [
+    "phase2_guard_schedules",
+    "phase2_guard_unavailable",
+    "phase3_enqueue_notification",
+    "phase3_validate_form",
+    "phase3_validate_form",
+    "phase3_validate_form",
+    "phase3_validate_form",
+    "phase3_validate_form",
+    "phase3_validate_form",
+    "trg_appointments_updated_at",
+    "trg_audit_appointments"
+  ],
+  "constraints": [
+    {
+      "name": "appointment_notification_versions_appointment_id_fkey",
+      "table": "appointment_notification_versions",
+      "definition": "FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "appointment_notification_versions_appointment_id_not_null",
+      "table": "appointment_notification_versions",
+      "definition": "NOT NULL appointment_id"
+    },
+    {
+      "name": "appointment_notification_versions_pkey",
+      "table": "appointment_notification_versions",
+      "definition": "PRIMARY KEY (appointment_id)"
+    },
+    {
+      "name": "appointment_notification_versions_revision_check",
+      "table": "appointment_notification_versions",
+      "definition": "CHECK ((revision > 0))"
+    },
+    {
+      "name": "appointment_notification_versions_revision_not_null",
+      "table": "appointment_notification_versions",
+      "definition": "NOT NULL revision"
+    },
+    {
+      "name": "appointments_created_by_fkey",
+      "table": "appointments",
+      "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "appointments_doctor_id_fkey",
+      "table": "appointments",
+      "definition": "FOREIGN KEY (doctor_id) REFERENCES doctors(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "appointments_doctor_id_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL doctor_id"
+    },
+    {
+      "name": "appointments_id_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "appointments_patient_id_fkey",
+      "table": "appointments",
+      "definition": "FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "appointments_patient_id_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL patient_id"
+    },
+    {
+      "name": "appointments_pkey",
+      "table": "appointments",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "appointments_recurrence_parent_id_fkey",
+      "table": "appointments",
+      "definition": "FOREIGN KEY (recurrence_parent_id) REFERENCES appointments(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "appointments_scheduled_time_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL scheduled_time"
+    },
+    {
+      "name": "appointments_source_check",
+      "table": "appointments",
+      "definition": "CHECK ((source = ANY (ARRAY['walk_in'::text, 'pre_booked'::text])))"
+    },
+    {
+      "name": "appointments_source_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL source"
+    },
+    {
+      "name": "appointments_status_check",
+      "table": "appointments",
+      "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'scheduled'::text, 'checked_in'::text, 'waiting'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text, 'no_show'::text])))"
+    },
+    {
+      "name": "appointments_status_not_null",
+      "table": "appointments",
+      "definition": "NOT NULL status"
+    },
+    {
+      "name": "phase2_appointment_minute_check",
+      "table": "appointments",
+      "definition": "CHECK ((isfinite(scheduled_time) AND (EXTRACT(second FROM (scheduled_time AT TIME ZONE 'Asia/Manila'::text)) = (0)::numeric)))"
+    },
+    {
+      "name": "audit_log_action_not_null",
+      "table": "audit_log",
+      "definition": "NOT NULL action"
+    },
+    {
+      "name": "audit_log_actor_id_fkey",
+      "table": "audit_log",
+      "definition": "FOREIGN KEY (actor_id) REFERENCES profiles(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "audit_log_entity_id_not_null",
+      "table": "audit_log",
+      "definition": "NOT NULL entity_id"
+    },
+    {
+      "name": "audit_log_entity_not_null",
+      "table": "audit_log",
+      "definition": "NOT NULL entity"
+    },
+    {
+      "name": "audit_log_id_not_null",
+      "table": "audit_log",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "audit_log_pkey",
+      "table": "audit_log",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "doctor_schedules_check",
+      "table": "doctor_schedules",
+      "definition": "CHECK ((start_time < end_time))"
+    },
+    {
+      "name": "doctor_schedules_day_of_week_check",
+      "table": "doctor_schedules",
+      "definition": "CHECK (((day_of_week >= 0) AND (day_of_week <= 6)))"
+    },
+    {
+      "name": "doctor_schedules_day_of_week_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL day_of_week"
+    },
+    {
+      "name": "doctor_schedules_doctor_id_fkey",
+      "table": "doctor_schedules",
+      "definition": "FOREIGN KEY (doctor_id) REFERENCES doctors(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "doctor_schedules_doctor_id_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL doctor_id"
+    },
+    {
+      "name": "doctor_schedules_end_time_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL end_time"
+    },
+    {
+      "name": "doctor_schedules_id_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "doctor_schedules_pkey",
+      "table": "doctor_schedules",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "doctor_schedules_slot_duration_minutes_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL slot_duration_minutes"
+    },
+    {
+      "name": "doctor_schedules_start_time_not_null",
+      "table": "doctor_schedules",
+      "definition": "NOT NULL start_time"
+    },
+    {
+      "name": "phase2_schedule_minutes_check",
+      "table": "doctor_schedules",
+      "definition": "CHECK ((((slot_duration_minutes >= 1) AND (slot_duration_minutes <= 1440)) AND (start_time < end_time) AND (EXTRACT(second FROM start_time) = (0)::numeric) AND (EXTRACT(second FROM end_time) = (0)::numeric) AND (((slot_duration_minutes * (60)::bigint))::numeric <= EXTRACT(epoch FROM (end_time - start_time)))))"
+    },
+    {
+      "name": "phase2_schedule_no_overlap",
+      "table": "doctor_schedules",
+      "definition": "EXCLUDE USING gist (doctor_id WITH =, day_of_week WITH =, int4range(((EXTRACT(epoch FROM start_time) / (60)::numeric))::integer, ((EXTRACT(epoch FROM end_time) / (60)::numeric))::integer, '[)'::text) WITH &&)"
+    },
+    {
+      "name": "doctor_unavailable_dates_date_not_null",
+      "table": "doctor_unavailable_dates",
+      "definition": "NOT NULL date"
+    },
+    {
+      "name": "doctor_unavailable_dates_doctor_id_date_key",
+      "table": "doctor_unavailable_dates",
+      "definition": "UNIQUE (doctor_id, date)"
+    },
+    {
+      "name": "doctor_unavailable_dates_doctor_id_fkey",
+      "table": "doctor_unavailable_dates",
+      "definition": "FOREIGN KEY (doctor_id) REFERENCES doctors(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "doctor_unavailable_dates_doctor_id_not_null",
+      "table": "doctor_unavailable_dates",
+      "definition": "NOT NULL doctor_id"
+    },
+    {
+      "name": "doctor_unavailable_dates_id_not_null",
+      "table": "doctor_unavailable_dates",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "doctor_unavailable_dates_pkey",
+      "table": "doctor_unavailable_dates",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "doctors_full_name_not_null",
+      "table": "doctors",
+      "definition": "NOT NULL full_name"
+    },
+    {
+      "name": "doctors_id_not_null",
+      "table": "doctors",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "doctors_pkey",
+      "table": "doctors",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "doctors_profile_id_fkey",
+      "table": "doctors",
+      "definition": "FOREIGN KEY (profile_id) REFERENCES profiles(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "notification_attempts_appointment_id_fkey",
+      "table": "notification_attempts",
+      "definition": "FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "notification_attempts_appointment_id_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL appointment_id"
+    },
+    {
+      "name": "notification_attempts_appointment_id_notification_type_revi_key",
+      "table": "notification_attempts",
+      "definition": "UNIQUE (appointment_id, notification_type, revision, channel)"
+    },
+    {
+      "name": "notification_attempts_attempt_count_check",
+      "table": "notification_attempts",
+      "definition": "CHECK (((attempt_count >= 0) AND (attempt_count <= 3)))"
+    },
+    {
+      "name": "notification_attempts_attempt_count_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL attempt_count"
+    },
+    {
+      "name": "notification_attempts_channel_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((channel = 'sms'::text))"
+    },
+    {
+      "name": "notification_attempts_channel_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL channel"
+    },
+    {
+      "name": "notification_attempts_created_at_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL created_at"
+    },
+    {
+      "name": "notification_attempts_delivery_status_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((delivery_status = ANY (ARRAY['not_verified'::text, 'queued'::text, 'sent'::text, 'delivered'::text, 'failed'::text])))"
+    },
+    {
+      "name": "notification_attempts_delivery_status_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL delivery_status"
+    },
+    {
+      "name": "notification_attempts_error_summary_check",
+      "table": "notification_attempts",
+      "definition": "CHECK (((error_summary IS NULL) OR (error_summary = ANY (ARRAY['provider_rejected'::text, 'rate_limited'::text, 'transport_unknown'::text, 'lease_expired'::text, 'not_configured'::text, 'no_destination'::text, 'invalid_destination'::text]))))"
+    },
+    {
+      "name": "notification_attempts_id_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "notification_attempts_notification_type_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((notification_type = ANY (ARRAY['confirmation'::text, 'reschedule'::text, 'cancellation'::text, 'reminder'::text])))"
+    },
+    {
+      "name": "notification_attempts_notification_type_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL notification_type"
+    },
+    {
+      "name": "notification_attempts_patient_id_fkey",
+      "table": "notification_attempts",
+      "definition": "FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT"
+    },
+    {
+      "name": "notification_attempts_patient_id_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL patient_id"
+    },
+    {
+      "name": "notification_attempts_pkey",
+      "table": "notification_attempts",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "notification_attempts_provider_check",
+      "table": "notification_attempts",
+      "definition": "CHECK (((provider IS NULL) OR (provider = ANY (ARRAY['twilio'::text, 'none'::text]))))"
+    },
+    {
+      "name": "notification_attempts_provider_reference_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((length(provider_reference) <= 128))"
+    },
+    {
+      "name": "notification_attempts_revision_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((revision > 0))"
+    },
+    {
+      "name": "notification_attempts_revision_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL revision"
+    },
+    {
+      "name": "notification_attempts_scheduled_time_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL scheduled_time"
+    },
+    {
+      "name": "notification_attempts_status_check",
+      "table": "notification_attempts",
+      "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'accepted'::text, 'failed'::text, 'unknown'::text, 'stubbed'::text, 'superseded'::text])))"
+    },
+    {
+      "name": "notification_attempts_status_not_null",
+      "table": "notification_attempts",
+      "definition": "NOT NULL status"
+    },
+    {
+      "name": "patient_visit_notes_appointment_id_fkey",
+      "table": "patient_visit_notes",
+      "definition": "FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "patient_visit_notes_created_by_fkey",
+      "table": "patient_visit_notes",
+      "definition": "FOREIGN KEY (created_by) REFERENCES profiles(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "patient_visit_notes_id_not_null",
+      "table": "patient_visit_notes",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "patient_visit_notes_note_not_null",
+      "table": "patient_visit_notes",
+      "definition": "NOT NULL note"
+    },
+    {
+      "name": "patient_visit_notes_patient_id_fkey",
+      "table": "patient_visit_notes",
+      "definition": "FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "patient_visit_notes_patient_id_not_null",
+      "table": "patient_visit_notes",
+      "definition": "NOT NULL patient_id"
+    },
+    {
+      "name": "patient_visit_notes_pkey",
+      "table": "patient_visit_notes",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "patients_full_name_not_null",
+      "table": "patients",
+      "definition": "NOT NULL full_name"
+    },
+    {
+      "name": "patients_id_not_null",
+      "table": "patients",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "patients_pkey",
+      "table": "patients",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "patients_user_id_fkey",
+      "table": "patients",
+      "definition": "FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE SET NULL"
+    },
+    {
+      "name": "profiles_full_name_not_null",
+      "table": "profiles",
+      "definition": "NOT NULL full_name"
+    },
+    {
+      "name": "profiles_id_fkey",
+      "table": "profiles",
+      "definition": "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE"
+    },
+    {
+      "name": "profiles_id_not_null",
+      "table": "profiles",
+      "definition": "NOT NULL id"
+    },
+    {
+      "name": "profiles_pkey",
+      "table": "profiles",
+      "definition": "PRIMARY KEY (id)"
+    },
+    {
+      "name": "profiles_role_check",
+      "table": "profiles",
+      "definition": "CHECK ((role = ANY (ARRAY['admin'::text, 'patient'::text])))"
+    },
+    {
+      "name": "profiles_role_not_null",
+      "table": "profiles",
+      "definition": "NOT NULL role"
+    }
+  ],
+  "rpcs": [
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "admin_link_patient(uuid,uuid)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "admin_set_profile_role(uuid,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "book_appointment(uuid,timestamp with time zone,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "cancel_appointment(uuid)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "claim_appointment_notifications(uuid,integer)",
+      "serviceExecute": true,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": false
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "ensure_patient_identity(text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "finish_appointment_notification(uuid,uuid,text,text,text,text,boolean)",
+      "serviceExecute": true,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": false
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "get_available_appointment_dates(uuid,date,integer)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "get_available_appointment_slots(uuid,date)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "patient_save_profile(text,date,text,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "queue_due_appointment_reminders(timestamp with time zone)",
+      "serviceExecute": true,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": false
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "record_notification_delivery(text,text)",
+      "serviceExecute": true,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": false
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "reschedule_appointment(uuid,uuid,timestamp with time zone)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_appointment_report(date,date,uuid)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_block_doctor_date(uuid,date,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_book_appointment(uuid,uuid,timestamp with time zone,text,text,text,uuid)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_cancel_appointment(uuid)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_check_in_appointment(uuid,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_report_audit(date,date,text,integer,integer)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_reschedule_appointment(uuid,uuid,timestamp with time zone)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    },
+    {
+      "settings": [
+        "search_path=\"\""
+      ],
+      "signature": "staff_set_appointment_status(uuid,text,text)",
+      "serviceExecute": false,
+      "securityDefiner": true,
+      "anonymousExecute": false,
+      "authenticatedExecute": true
+    }
+  ]
+}

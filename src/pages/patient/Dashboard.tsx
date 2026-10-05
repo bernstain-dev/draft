@@ -1,3 +1,7 @@
+import { ChevronRight } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import QueryState from '../../components/QueryState';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getPatientClient, usePatientAuth } from './auth/patientAuth';
@@ -8,37 +12,29 @@ interface Row extends Appointment {
   doctor?: Doctor | null;
 }
 
-const UPCOMING = ['pending', 'scheduled', 'confirmed', 'checked_in', 'waiting', 'in_progress'];
+const UPCOMING = ['pending', 'scheduled', 'checked_in', 'waiting', 'in_progress'];
 
 export default function PatientDashboard() {
   const sb = getPatientClient();
   const { profile, patient } = usePatientAuth();
-  const [upcoming, setUpcoming] = useState<Row[]>([]);
-  const [doctorCount, setDoctorCount] = useState(0);
-  const [pastCount, setPastCount] = useState(0);
-
-  useEffect(() => {
-    sb.from('doctors').select('id', { count: 'exact', head: true }).eq('is_active', true).then(({ count }) => {
-      setDoctorCount(count ?? 0);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!patient) return;
-    sb.from('appointments')
-      .select('*, doctor:doctors(*)')
-      .eq('patient_id', patient.id)
-      .in('status', UPCOMING)
-      .order('scheduled_time')
-      .then(({ data }) => setUpcoming((data as Row[]) ?? []));
-    sb.from('appointments')
-      .select('id', { count: 'exact', head: true })
-      .eq('patient_id', patient.id)
-      .in('status', ['completed', 'cancelled', 'no_show'])
-      .then(({ count }) => setPastCount(count ?? 0));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patient?.id]);
+  const revision = useAppointmentRevision();
+  const doctorQuery = useClinicQuery<number>(`doctors/${revision}`, async (signal) => {
+    const { count, error } = await sb.from('doctors').select('id', { count: 'exact', head: true }).eq('is_active', true).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return count ?? 0;
+  }, 0);
+  const list = useClinicQuery<{ upcoming: Row[]; pastCount: number }>(patient ? `${patient.id}/${revision}` : '', async (signal) => {
+    const [visits, past] = await Promise.all([
+      sb.from('appointments').select('*, doctor:doctors(*)').eq('patient_id', patient!.id)
+        .in('status', UPCOMING).order('scheduled_time').abortSignal(signal),
+      sb.from('appointments').select('id', { count: 'exact', head: true }).eq('patient_id', patient!.id)
+        .in('status', ['completed', 'cancelled', 'no_show']).abortSignal(signal),
+    ]);
+    if (visits.error || past.error) throw new Error(visits.error?.message || past.error!.message);
+    return { upcoming: visits.data as Row[] ?? [], pastCount: past.count ?? 0 };
+  }, { upcoming: [], pastCount: 0 });
+  const { upcoming, pastCount } = list.data;
+  const doctorCount = doctorQuery.data;
 
   const next = useMemo(() => {
     const now = Date.now();
@@ -49,8 +45,11 @@ export default function PatientDashboard() {
 
   const firstName = (profile?.full_name ?? '').split(' ')[0] || 'there';
 
+  if (list.loading || list.error) return <QueryState query={list} label="appointments" />;
+  if (doctorQuery.loading || doctorQuery.error) return <QueryState query={doctorQuery} label="appointments" />;
   return (
     <div className="space-y-4">
+      {(list.error || doctorQuery.error) && <p role="alert">{list.error || doctorQuery.error}</p>}
       <div>
         <p className="text-sm text-slate-400">Good day, {firstName}!</p>
         <h1 className="text-2xl font-bold">Dashboard</h1>
@@ -82,19 +81,19 @@ export default function PatientDashboard() {
         <Link to="/patient/appointments" className="dk-panel transition-colors hover:border-white/15">
           <p className="text-xs text-slate-400">My Appointments</p>
           <p className="mt-1 text-3xl font-bold">{upcoming.length}</p>
-          <p className="mt-1 text-xs text-[#4ea895]">View your visits →</p>
+          <p className="icon-label mt-1 text-xs text-[#4ea895]">View your visits<AppIcon icon={ChevronRight} size={16} /></p>
         </Link>
 
         <Link to="/patient/book" className="dk-panel transition-colors hover:border-white/15">
           <p className="text-xs text-slate-400">Available Doctors</p>
           <p className="mt-1 text-3xl font-bold">{doctorCount}</p>
-          <p className="mt-1 text-xs text-[#4ea895]">Choose a doctor →</p>
+          <p className="icon-label mt-1 text-xs text-[#4ea895]">Choose a doctor<AppIcon icon={ChevronRight} size={16} /></p>
         </Link>
 
         <Link to="/patient/history" className="dk-panel transition-colors hover:border-white/15">
           <p className="text-xs text-slate-400">Appointment History</p>
           <p className="mt-1 text-3xl font-bold">{pastCount}</p>
-          <p className="mt-1 text-xs text-[#4ea895]">View history →</p>
+          <p className="icon-label mt-1 text-xs text-[#4ea895]">View history<AppIcon icon={ChevronRight} size={16} /></p>
         </Link>
       </div>
 
@@ -118,7 +117,7 @@ export default function PatientDashboard() {
       <div className="dk-panel">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="font-semibold">My Appointments</h2>
-          <Link to="/patient/appointments" className="text-xs text-[#4ea895] hover:underline">View all →</Link>
+          <Link to="/patient/appointments" className="icon-button icon-label text-xs text-[#4ea895] hover:underline">View all<AppIcon icon={ChevronRight} size={16} /></Link>
         </div>
         {upcoming.length === 0 ? (
           <p className="py-2 text-sm text-slate-500">You don&apos;t have any scheduled appointments yet.</p>

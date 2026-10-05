@@ -1,8 +1,5 @@
-// Verification: queue removal + patient booking architecture.
-// Static checks ALWAYS run. Live Supabase checks run only when env is set:
-//   SUPABASE_URL, SUPABASE_ANON_KEY, PATIENT_EMAIL, PATIENT_PASSWORD
-//   [STAFF_EMAIL, STAFF_PASSWORD] for the live double-booking test.
-// Usage: node scripts/verify.mjs
+// Offline static verification only. Never connects to Supabase or reads env credentials.
+// Runtime authorization/concurrency coverage: node scripts/test-phase1.mjs
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,11 +49,11 @@ check('staff booking surfaces 23505 as taken-slot', /23505/.test(booking));
 // 3. Patient backend: policies + RPCs
 for (const p of ['patient_read_doctors', 'patient_read_schedules', 'patient_read_unavailable',
   'patient_select_own', 'patient_insert_own', 'patient_update_own',
-  'patient_select_own_appointments', 'patient_insert_own_appointments', 'patient_update_own_appointments']) {
-  check(`patient RLS policy ${p}`, schema.includes(`"${p}"`));
+  'patient_select_own_appointments']) {
+  check(`patient RLS policy ${p}`, new RegExp(`create policy [" ]?${p}[" ]? on`).test(schema));
 }
 for (const f of ['my_patient_id', 'book_appointment', 'reschedule_appointment', 'cancel_appointment']) {
-  check(`RPC ${f} defined + granted`, new RegExp(`function ${f}\\(`).test(schema));
+  check(`RPC ${f} defined + granted`, new RegExp(`function (?:public\\.)?${f}\\(`).test(schema));
 }
 
 // 4. Patient booking workflow copy
@@ -90,9 +87,8 @@ check('shared LoginShell holds no auth logic (boundary)',
   !/supabase|useStaffAuth|usePatientAuth|signIn/.test(shell));
 
 // 6. Single seeder: admin + patient logins only, plus demo data
-check('seed.cjs creates admin + patient only (no receptionist/doctor/board)',
-  /vacunawa@gmail\.com/.test(seed) && /patient@gmail\.com/.test(seed) &&
-  !/receptionist/.test(seed) && !/doctor@rhu/.test(seed) && !/'board'/.test(seed));
+check('seed.cjs remains a backend-only bootstrap tool',
+  /SUPABASE_SERVICE_ROLE_KEY/.test(seed));
 check('seed.cjs links patient login to a patient record', /user_id/.test(seed));
 check('seed.cjs seeds doctors/schedules/patients/appointments/notes',
   /doctor_schedules/.test(seed) && /patient_visit_notes/.test(seed) && /upsert/.test(seed));
@@ -100,54 +96,48 @@ check('old seed files removed',
   !existsSync(join(root, 'supabase/seedusers.sql')) &&
   !existsSync(join(root, 'supabase/seed_admin.sql')) &&
   !existsSync(join(root, 'supabase/create_admin.cjs')));
-check('booking RPC-first with missing-function fallback',
-  /rpc\('book_appointment'/.test(bookFlow) && /isMissingRpc/.test(bookFlow));
+check('patient booking is RPC-only and fails closed',
+  /rpc\('book_appointment'/.test(bookFlow) && !/isMissingRpc|\.insert\(|\.update\(/.test(bookFlow));
+check('staff booking uses authoritative RPC', /rpc\('staff_book_appointment'/.test(booking));
+check('staff check-in uses authorized RPC', /rpc\('staff_check_in_appointment'/.test(checkIn));
+check('profile role changes use authorized RPC',
+  /rpc\('admin_set_profile_role'/.test(read('src/pages/appointments/Settings.tsx')));
+check('patient profile INSERT omits role',
+  !/\.insert\(\{[^}]*role:/.test(patientAuth));
 
-// ---- Live checks (skipped without env) ----
-const env = process.env;
-if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY && env.PATIENT_EMAIL && env.PATIENT_PASSWORD) {
-  const { createClient } = await import('@supabase/supabase-js');
-  const p = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, { auth: { persistSession: false } });
-  const { error: loginErr } = await p.auth.signInWithPassword({ email: env.PATIENT_EMAIL, password: env.PATIENT_PASSWORD });
-  check('live: patient login succeeds', !loginErr, loginErr?.message ?? '');
-  if (!loginErr) {
-    const { data: pats, error: pErr } = await p.from('patients').select('id');
-    check('live: patient sees own patient row only', !pErr && (pats ?? []).length === 1, pErr?.message ?? `${(pats ?? []).length} rows`);
-    const { error: nErr } = await p.from('patient_visit_notes').select('id').limit(1);
-    check('live: patient blocked from visit notes', nErr !== null, nErr?.message ?? 'readable!');
-    const { data: docs } = await p.from('doctors').select('id').eq('is_active', true).limit(1);
-    if (docs?.length) {
-      const slot = new Date(Date.now() + 7 * 864e5).toISOString();
-      const first = await p.rpc('book_appointment', { p_doctor_id: docs[0].id, p_scheduled_time: slot });
-      if (!first.error) {
-        const second = await p.rpc('book_appointment', { p_doctor_id: docs[0].id, p_scheduled_time: slot });
-        check('live: double-booking rejected via RPC', second.error !== null, second.error?.message ?? 'second booking succeeded!');
-        await p.rpc('cancel_appointment', { p_appointment_id: first.data.id });
-      } else {
-        console.log(`SKIP  live double-booking (slot off-grid or taken: ${first.error.message})`);
-      }
-    } else check('live: double-booking setup (need 1 active doctor)', false, 'seed data missing');
-    await p.auth.signOut();
-  }
-  if (env.STAFF_EMAIL && env.STAFF_PASSWORD) {
-    const s = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, { auth: { persistSession: false } });
-    await s.auth.signInWithPassword({ email: env.STAFF_EMAIL, password: env.STAFF_PASSWORD });
-    const { data: docs } = await s.from('doctors').select('id').eq('is_active', true).limit(1);
-    const { data: pats } = await s.from('patients').select('id').limit(1);
-    if (docs?.length && pats?.length) {
-      const slot = new Date(Date.now() + 8 * 864e5).toISOString();
-      const first = await s.from('appointments').insert({ doctor_id: docs[0].id, patient_id: pats[0].id, scheduled_time: slot }).select('id').single();
-      if (!first.error) {
-        const second = await s.from('appointments').insert({ doctor_id: docs[0].id, patient_id: pats[0].id, scheduled_time: slot });
-        check('live: double-booking rejected (23505)', second.error?.code === '23505', second.error?.message ?? 'second insert succeeded!');
-        await s.from('appointments').delete().eq('id', first.data.id);
-      } else check('live: double-booking setup insert', false, first.error.message);
-    } else check('live: double-booking setup (need 1 doctor + 1 patient)', false, 'seed data missing');
-    await s.auth.signOut();
-  } else console.log('SKIP  live double-booking (set STAFF_EMAIL/STAFF_PASSWORD)');
-} else {
-  console.log('SKIP  live Supabase checks (set SUPABASE_URL/ANON_KEY/PATIENT_EMAIL/PATIENT_PASSWORD)');
-}
+// Phase 2 architecture checks complement mounted React and local SQL tests.
+const phase2 = read('supabase/fix_phase2_booking_availability.sql');
+const authFlow = read('src/lib/usePortalAuth.ts');
+check('both portals consume the shared availability hook', /useAvailability\(sb, doctorId, dateKey\)/.test(bookFlow) && /useAvailability\(sb, doctorId, dateKey\)/.test(booking));
+check('React does not generate appointment slots', !/generateSlots/.test(read('src/lib/slots.ts') + bookFlow + booking));
+check('availability returns timestamps/durations only', /returns table \(scheduled_time timestamptz, slot_duration_minutes integer\)/.test(phase2));
+check('backend rejects schedule overlap and invalid minute durations', /phase2_schedule_no_overlap/.test(phase2) && /phase2_schedule_minutes_check/.test(phase2));
+check('blocking dates uses authorized conflict-aware operation', /rpc\('staff_block_doctor_date'/.test(read('src/pages/appointments/Doctors.tsx')) && /conflict_count/.test(phase2));
+check('legacy name matching removed from authentication', !/byName|eq\('full_name'|legacy/i.test(patientAuth + authFlow + read('src/lib/portalIdentity.ts')));
+check('auth callback is synchronous and subscription cleans up', /onAuthStateChange\(\(_event, session\) =>/.test(authFlow) && /subscription\.unsubscribe\(\)/.test(authFlow));
+check('portal signout uses local scope', /signOut\(\{ scope: 'local' \}\)/.test(authFlow));
+check('appointment views subscribe to mutation invalidation', ['src/pages/appointments/Dashboard.tsx','src/pages/appointments/CheckIn.tsx','src/pages/patient/MyAppointments.tsx','src/pages/patient/AppointmentHistory.tsx'].every((file) => /useAppointmentRevision\(\)/.test(read(file))));
+check('weekly doctor display checks exact clinic week dates', /clinicWeekDates\(\)/.test(read('src/pages/appointments/Doctors.tsx')) && /u\.date === date/.test(read('src/pages/appointments/Doctors.tsx')));
 
-console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
+// Phase 3 source structure; behavioral claims require the separate local suite.
+const phase3 = read('supabase/fix_phase3_notifications_reports.sql');
+check('durable notification event idempotency is defined', /unique\(appointment_id,notification_type,revision,channel\)/.test(phase3));
+check('ledger worker RPCs are service-only', /notification_result\(uuid\),public\.record_notification_delivery\(text,text\) to service_role/.test(phase3));
+check('confirmation verifies Auth and ownership via SQL', /auth\.getUser\(\)/.test(read('supabase/functions/_shared/handlers.ts')) && /request_appointment_notification/.test(phase3));
+check('notification CORS uses explicit origins and OPTIONS', /allowed\.includes\(origin\)/.test(read('supabase/functions/_shared/http.ts')) && /method === 'OPTIONS'/.test(read('supabase/functions/_shared/handlers.ts')));
+check('provider result distinguishes acceptance from delivery', /accepted: status === 'accepted'/.test(read('supabase/functions/_shared/notify.ts')) && /delivery: 'not_verified'/.test(read('supabase/functions/_shared/notify.ts')));
+check('notification providers do not log patient payloads', !/console\.(log|error)/.test(read('supabase/functions/_shared/notify.ts') + read('supabase/functions/_shared/handlers.ts')));
+check('both booking portals notify only after approved mutations', /notifyAppointment\(sb/.test(bookFlow) && /notifyAppointment\(sb/.test(booking));
+check('reminders use Manila dates and durable unique events', /p_now at time zone 'Asia\/Manila'/.test(phase3) && /notification_type='reminder'|,'reminder',/.test(phase3));
+check('reports use complete server aggregation and ID grouping', /rpc\('staff_appointment_report'/.test(read('src/pages/appointments/Reports.tsx')) && /group by doctor_id/.test(phase3) && /group by patient_id/.test(phase3));
+check('CSV uses shared spreadsheet-safe encoder', /downloadCsv.*lib\/csv/.test(read('src/pages/appointments/Reports.tsx')) && /safe\.replace/.test(read('src/lib/csv.ts')));
+check('doctor editing is validated and non-destructive', /saveDoctor/.test(read('src/pages/appointments/Doctors.tsx')) && /doctorFormError/.test(read('src/pages/appointments/Doctors.tsx')) && /revoke delete on public\.doctors, public\.patients/.test(phase3));
+check('intentional linking UI uses exact UUID/admin operation', /validUuid/.test(read('src/components/PatientLink.tsx')) && /rpc\('admin_link_patient'/.test(read('src/components/PatientLink.tsx')));
+check('major mutation pages use synchronous pending gate', ['src/pages/appointments/Booking.tsx','src/pages/appointments/CheckIn.tsx','src/pages/appointments/Patients.tsx','src/pages/appointments/Doctors.tsx','src/pages/appointments/Settings.tsx'].every(f=>/mutation\.run/.test(read(f))));
+check('staff Realtime unsubscribes through isolated provider', /useAppointmentRealtime/.test(staffAuth) && /removeChannel/.test(read('src/lib/useAppointmentRealtime.ts')));
+check('nonexistent confirmed database status is removed', !/case ['"]confirmed['"]/.test(read('src/lib/patient.ts')));
+check('safe environment template and local-only demonstration guard exist', /replace-with-public-anon-key/.test(read('.env.example')) && /Hosted seeding is refused/.test(seed));
+check('signed delivery callbacks and Vault cron definitions exist', /HMAC/.test(read('supabase/functions/_shared/delivery.ts')) && /vault\.decrypted_secrets/.test(read('supabase/fix_phase3_scheduler.sql')));
+
+console.log(failures === 0 ? '\nALL CHECKS PASSED (static only)' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

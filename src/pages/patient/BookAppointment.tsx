@@ -1,8 +1,16 @@
+import { Calendar, ChevronLeft, ChevronRight, CircleCheck, Clock } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { notifyAppointment } from '../../lib/notifications';
+import { useMutation } from '../../lib/useMutation';
+import QueryState from '../../components/QueryState';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getPatientClient, usePatientAuth } from './auth/patientAuth';
-import type { Appointment, Doctor, DoctorSchedule, DoctorUnavailable } from '../../lib/types';
-import { generateSlots, toLocalDateKey } from '../../lib/slots';
+import type { Appointment, Doctor, DoctorSchedule } from '../../lib/types';
+import { clinicDateKey, clinicWeekday, formatClinicDate } from '../../lib/clinicTime';
+import { useAvailability } from '../../lib/useAvailability';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
+import { appointmentMutationSucceeded } from '../../lib/appointmentChanges';
 import {
   MSG,
   formatDateLong,
@@ -11,7 +19,6 @@ import {
   formatTime,
   patientStatusLabel,
 } from '../../lib/patient';
-import { isMissingRpc } from '../../lib/patientRpc';
 
 type Step = 'doctor' | 'date' | 'time' | 'review' | 'success';
 
@@ -43,133 +50,54 @@ export default function BookAppointment() {
   const preselectDoctor = params.get('doctor') ?? '';
 
   const [step, setStep] = useState<Step>('doctor');
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const revision = useAppointmentRevision();
   const [doctorId, setDoctorId] = useState(preselectDoctor);
   const [expandedDoctor, setExpandedDoctor] = useState('');
-  const [schedules, setSchedules] = useState<DoctorSchedule[]>([]);
-  const [unavail, setUnavail] = useState<DoctorUnavailable[]>([]);
+
   const [dateKey, setDateKey] = useState('');
-  const [booked, setBooked] = useState<Appointment[]>([]);
   const [slotIso, setSlotIso] = useState('');
   const [slotTime, setSlotTime] = useState('');
   const [reason, setReason] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const mutation = useMutation(setMsg);
+  const busy = mutation.pending;
   const [summary, setSummary] = useState<BookedSummary | null>(null);
-  const [reschedInfo, setReschedInfo] = useState<Appointment | null>(null);
 
-  const doctor = useMemo(() => doctors.find((d) => d.id === doctorId) ?? null, [doctors, doctorId]);
-
-  // Load active doctors
-  useEffect(() => {
-    sb.from('doctors')
-      .select('*')
-      .eq('is_active', true)
-      .order('full_name')
-      .then(({ data }) => {
-        const list = (data as Doctor[]) ?? [];
-        setDoctors(list);
-        if (preselectDoctor && list.some((d) => d.id === preselectDoctor)) {
-          setDoctorId(preselectDoctor);
-        }
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const doctorQuery = useClinicQuery<Doctor[]>(`doctors/${revision}`, async (signal) => {
+    const { data, error } = await sb.from('doctors').select('*').eq('is_active', true).order('full_name').abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return (data as Doctor[]) ?? [];
   }, []);
-
-  // Load reschedule target (ownership is enforced by RLS + RPC)
+  const doctors = doctorQuery.data;
+  const doctor = doctors.find((d) => d.id === doctorId) ?? null;
+  const rescheduleQuery = useClinicQuery<Appointment | null>(rescheduleId && patient ? `${patient.id}/${rescheduleId}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.from('appointments').select('*').eq('id', rescheduleId).eq('patient_id', patient!.id).abortSignal(signal).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('Appointment not found.');
+    return data as Appointment;
+  }, null);
+  const reschedInfo = rescheduleQuery.data;
   useEffect(() => {
-    if (!rescheduleId) return;
-    sb.from('appointments')
-      .select('*')
-      .eq('id', rescheduleId)
-      .maybeSingle()
-      .then(({ data }) => {
-        const a = data as Appointment | null;
-        if (a) {
-          setReschedInfo(a);
-          setDoctorId(a.doctor_id);
-          setReason((a as { reason?: string | null }).reason ?? '');
-        }
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rescheduleId]);
-
-  // Load doctor availability when a doctor is picked
-  useEffect(() => {
-    if (!doctorId) {
-      setSchedules([]);
-      setUnavail([]);
-      return;
-    }
-    Promise.all([
-      sb.from('doctor_schedules').select('*').eq('doctor_id', doctorId),
-      sb.from('doctor_unavailable_dates').select('*').eq('doctor_id', doctorId),
-    ]).then(([{ data: s }, { data: u }]) => {
-      setSchedules((s as DoctorSchedule[]) ?? []);
-      setUnavail((u as DoctorUnavailable[]) ?? []);
-      setDateKey('');
-      setSlotIso('');
-      setSlotTime('');
-      setBooked([]);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctorId]);
-
-  const unavailSet = useMemo(() => new Set(unavail.map((u) => u.date)), [unavail]);
-  const openDows = useMemo(() => new Set(schedules.map((s) => s.day_of_week)), [schedules]);
-
-  // Next 30 days with availability flags
-  const dateOptions = useMemo(() => {
-    const out: { key: string; dow: number; available: boolean; reason?: string }[] = [];
-    const today = new Date();
-    for (let i = 0; i < NEXT_DAYS; i++) {
-      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-      const key = toLocalDateKey(d);
-      const dow = d.getDay();
-      if (unavailSet.has(key)) {
-        out.push({ key, dow, available: false, reason: 'unavailable' });
-      } else if (!openDows.has(dow)) {
-        out.push({ key, dow, available: false, reason: 'closed' });
-      } else {
-        out.push({ key, dow, available: true });
-      }
-    }
-    return out;
-  }, [openDows, unavailSet]);
-
-  // Load booked slots for the chosen date
-  useEffect(() => {
-    if (!doctorId || !dateKey) {
-      setBooked([]);
-      return;
-    }
-    const s = new Date(`${dateKey}T00:00:00`).toISOString();
-    const e = new Date(`${dateKey}T23:59:59.999`).toISOString();
-    sb.from('appointments')
-      .select('*')
-      .eq('doctor_id', doctorId)
-      .gte('scheduled_time', s)
-      .lte('scheduled_time', e)
-      .then(({ data }) => setBooked((data as Appointment[]) ?? []));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctorId, dateKey]);
-
-  const slots = useMemo(() => {
-    if (!dateKey) return [];
-    const dow = new Date(`${dateKey}T12:00:00`).getDay();
-    const all = generateSlots(dateKey, schedules, unavail, booked, dow);
-    // Hide times that already passed today
-    if (dateKey === toLocalDateKey(new Date())) {
-      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-      return all.filter((s) => {
-        const [h, m] = s.time.split(':').map(Number);
-        return h * 60 + m > nowMin;
-      });
-    }
-    return all;
-  }, [dateKey, schedules, unavail, booked]);
-
-  const availableSlots = useMemo(() => slots.filter((s) => !s.taken), [slots]);
+    if (reschedInfo) { setDoctorId(reschedInfo.doctor_id); setReason(reschedInfo.reason ?? ''); }
+  }, [reschedInfo?.id]);
+  const scheduleQuery = useClinicQuery<DoctorSchedule[]>(doctorId ? `schedules/${doctorId}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.from('doctor_schedules').select('*').eq('doctor_id', doctorId).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return (data as DoctorSchedule[]) ?? [];
+  }, []);
+  const schedules = scheduleQuery.data;
+  const today = clinicDateKey();
+  const datesQuery = useClinicQuery<{ clinic_date: string; available: boolean }[]>(doctorId ? `dates/${doctorId}/${today}/${revision}` : '', async (signal) => {
+    const { data, error } = await sb.rpc('get_available_appointment_dates', { p_doctor_id: doctorId, p_start: today, p_days: NEXT_DAYS }).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }, []);
+  const dateOptions = datesQuery.data.map((d) => ({ key: d.clinic_date, dow: clinicWeekday(d.clinic_date), available: d.available }));
+  const availability = useAvailability(sb, doctorId, dateKey);
+  const slots = availability.data;
+  const availableSlots = slots;
+  useEffect(() => { setSlotIso(''); setSlotTime(''); }, [doctorId, dateKey, revision]);
+  const queryError = doctorQuery.error || rescheduleQuery.error || scheduleQuery.error || datesQuery.error || availability.error;
 
   const doctorDaysLine = useMemo(() => {
     if (schedules.length === 0) return 'Schedule to be announced';
@@ -182,160 +110,74 @@ export default function BookAppointment() {
 
   function pickDoctor(id: string) {
     setDoctorId(id);
+    setDateKey('');
+    setSlotIso('');
+    setSlotTime('');
     setMsg(null);
     setStep('date');
   }
 
   async function confirmBooking() {
-    setMsg(null);
-    if (!doctor || !dateKey || !slotIso) {
-      setMsg('Please choose a doctor, date, and time first.');
-      return;
-    }
-    let pid = patient?.id ?? null;
-    if (!pid) {
-      await refreshPatient().catch(() => undefined);
-      setMsg('Your profile is still loading. Please wait a moment and try again.');
-      return;
-    }
-    setBusy(true);
-    try {
-      const scheduledTime = new Date(slotIso).toISOString();
+    await mutation.run(async () => {
+      if (busy) return;
+      setMsg(null);
+      if (!doctor || !dateKey || !slotIso) {
+        setMsg('Please choose a doctor, date, and time first.');
+        return;
+      }
+      if (!patient) {
+        await refreshPatient().catch(() => undefined);
+        setMsg('Your profile is still loading. Please wait a moment and try again.');
+        return;
+      }
+      if (rescheduleId && !reschedInfo) {
+        setMsg('The appointment to reschedule could not be loaded.');
+        return;
+      }
 
-      if (rescheduleId && reschedInfo) {
-        // Prefer the backend RPC (ownership + availability + conflict checks).
-        const rpc = await sb.rpc('reschedule_appointment', {
-          p_appointment_id: rescheduleId,
-          p_doctor_id: doctor.id,
-          p_scheduled_time: scheduledTime,
-        });
-        if (!rpc.error) {
-          setSummary({
-            id: rescheduleId,
-            doctorName: doctor.full_name,
-            specialty: doctor.specialty ?? '',
-            dateKey,
-            time: slotTime,
-          });
-          setStep('success');
+      try {
+        const scheduledTime = slotIso;
+        // Fail closed: every mutation must pass database authorization and
+        // shared schedule validation. Never fall back to a table write.
+        const rpc = rescheduleId
+          ? await sb.rpc('reschedule_appointment', {
+              p_appointment_id: rescheduleId,
+              p_doctor_id: doctor.id,
+              p_scheduled_time: scheduledTime,
+            })
+          : await sb.rpc('book_appointment', {
+              p_doctor_id: doctor.id,
+              p_scheduled_time: scheduledTime,
+              p_reason: reason.trim() || null,
+            });
+        if (rpc.error) {
+          setMsg(rpc.error.code === '23505' ? MSG.conflict : rpc.error.message);
           return;
         }
-        // A real validation message from the RPC must be shown as-is —
-        // only fall back to a direct update when the RPC isn't deployed.
-        if (!isMissingRpc(rpc.error)) {
-          setMsg(rpc.error.message);
+        const result = rpc.data as { id?: string; success?: boolean } | null;
+        if (!result?.success || !result.id) {
+          setMsg(MSG.failure);
           return;
         }
-        // Fallback: direct update (RLS still enforces ownership).
-        const { error: upErr } = await sb
-          .from('appointments')
-          .update({ doctor_id: doctor.id, scheduled_time: scheduledTime })
-          .eq('id', rescheduleId);
-        if (upErr) {
-          setMsg(upErr.code === '23505' ? MSG.conflict : `${MSG.failure} (${upErr.message})`);
-          // Refresh slot state — someone may have taken it.
-          setSlotIso('');
-          setSlotTime('');
-          const s = new Date(`${dateKey}T00:00:00`).toISOString();
-          const e = new Date(`${dateKey}T23:59:59.999`).toISOString();
-          const { data } = await sb
-            .from('appointments')
-            .select('*')
-            .eq('doctor_id', doctor.id)
-            .gte('scheduled_time', s)
-            .lte('scheduled_time', e);
-          setBooked((data as Appointment[]) ?? []);
-          return;
-        }
+        appointmentMutationSucceeded(rpc);
         setSummary({
-          id: rescheduleId,
+          id: result.id,
           doctorName: doctor.full_name,
           specialty: doctor.specialty ?? '',
           dateKey,
           time: slotTime,
         });
         setStep('success');
-        return;
+        setMsg(await notifyAppointment(sb, result.id, rescheduleId ? 'reschedule' : 'confirmation') || null);
+      } catch {
+        setMsg(MSG.failure);
       }
-
-      // New booking — prefer the backend RPC (all 10 validations server-side).
-      const rpc = await sb.rpc('book_appointment', {
-        p_doctor_id: doctor.id,
-        p_scheduled_time: scheduledTime,
-        p_reason: reason.trim() || null,
-      });
-      if (!rpc.error) {
-        const row = rpc.data as { id?: string } | null;
-        setSummary({
-          id: (row?.id as string) ?? '',
-          doctorName: doctor.full_name,
-          specialty: doctor.specialty ?? '',
-          dateKey,
-          time: slotTime,
-        });
-        setStep('success');
-        return;
-      }
-      // A real validation message from the RPC must be shown as-is —
-      // only fall back to a direct insert when the RPC isn't deployed.
-      if (!isMissingRpc(rpc.error)) {
-        setMsg(rpc.error.message);
-        return;
-      }
-
-      // Fallback when the RPC is not deployed yet: validated direct insert.
-      const payload: Record<string, unknown> = {
-        doctor_id: doctor.id,
-        patient_id: pid,
-        scheduled_time: scheduledTime,
-        source: 'pre_booked',
-        status: 'scheduled',
-      };
-      // `reason` column only exists post-migration — try with, retry without.
-      let insert = await sb.from('appointments').insert({ ...payload, reason: reason.trim() || null }).select('id').single();
-      if (insert.error && /reason/i.test(insert.error.message)) {
-        insert = await sb.from('appointments').insert(payload).select('id').single();
-      }
-      if (insert.error) {
-        if (insert.error.code === '23505') setMsg(MSG.conflict);
-        else setMsg(`${MSG.failure} (${insert.error.message})`);
-        const s = new Date(`${dateKey}T00:00:00`).toISOString();
-        const e = new Date(`${dateKey}T23:59:59.999`).toISOString();
-        const { data } = await sb
-          .from('appointments')
-          .select('*')
-          .eq('doctor_id', doctor.id)
-          .gte('scheduled_time', s)
-          .lte('scheduled_time', e);
-        setBooked((data as Appointment[]) ?? []);
-        setSlotIso('');
-        setSlotTime('');
-        return;
-      }
-      const newId = (insert.data as { id: string }).id;
-      // Reason fallback for pre-migration DBs: store as a visit note.
-      if (reason.trim()) {
-        try {
-          await sb.from('patient_visit_notes').insert({ patient_id: pid, appointment_id: newId, note: reason.trim() });
-        } catch {
-          // notes are best-effort; booking already succeeded
-        }
-      }
-      setSummary({
-        id: newId,
-        doctorName: doctor.full_name,
-        specialty: doctor.specialty ?? '',
-        dateKey,
-        time: slotTime,
-      });
-      setStep('success');
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   const stepDots = ['doctor', 'date', 'time', 'review'] as const;
 
+  if (doctorQuery.loading || doctorQuery.error) return <QueryState query={doctorQuery} label="doctors" />;
   return (
     <div className="space-y-4">
       <div>
@@ -362,14 +204,15 @@ export default function BookAppointment() {
                 <span className={active ? 'font-semibold text-slate-200' : 'text-slate-500'}>
                   {s === 'doctor' ? 'Doctor' : s === 'date' ? 'Date' : s === 'time' ? 'Time' : 'Review'}
                 </span>
-                {i < stepDots.length - 1 && <span className="text-slate-600">›</span>}
+                {i < stepDots.length - 1 && <AppIcon icon={ChevronRight} size={16} className="text-slate-600" />}
               </li>
             );
           })}
         </ol>
       )}
 
-      {msg && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{msg}</p>}
+      <QueryState query={rescheduleQuery} label="appointment to reschedule" /><QueryState query={scheduleQuery} label="doctor schedule" /><QueryState query={datesQuery} label="appointment dates" />
+      {(msg || queryError) && <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{queryError || msg}</p>}
 
       {step === 'doctor' && (
         <section aria-labelledby="choose-doctor">
@@ -422,15 +265,14 @@ export default function BookAppointment() {
             <p className="text-xs text-slate-500">Booking an appointment with</p>
             <h2 id="choose-date" className="text-lg font-semibold">Book an Appointment with {doctor.full_name}</h2>
             <p className="text-sm text-slate-400">{doctor.specialty ?? 'General Medicine'} · Available Appointment Days: {doctorDaysLine}</p>
-            <button type="button" className="mt-2 text-xs text-[#4ea895] hover:underline" onClick={() => setStep('doctor')}>
-              ← Change Doctor
+            <button type="button" className="icon-button mt-2 text-xs text-[#4ea895] hover:underline" onClick={() => setStep('doctor')}>
+              <AppIcon icon={ChevronLeft} size={16} />Change Doctor
             </button>
           </div>
           <h3 className="text-base font-semibold">Choose a Date</h3>
           <p className="text-sm text-slate-400">Select a date when {doctor.full_name} is available.</p>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
             {dateOptions.map(({ key, dow, available }) => {
-              const d = new Date(`${key}T12:00:00`);
               const selected = dateKey === key;
               return (
                 <button
@@ -454,8 +296,8 @@ export default function BookAppointment() {
                   }`}
                 >
                   <span className="block text-[11px] uppercase">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow]}</span>
-                  <span className="block text-sm font-bold">{d.getDate()}</span>
-                  <span className="block text-[11px]">{d.toLocaleString(undefined, { month: 'short' })}</span>
+                  <span className="block text-sm font-bold">{Number(key.slice(8))}</span>
+                  <span className="block text-[11px]">{formatClinicDate(key, { month: 'short' })}</span>
                 </button>
               );
             })}
@@ -468,13 +310,13 @@ export default function BookAppointment() {
           <div className="dk-panel">
             <p className="text-xs text-slate-500">Appointment with {doctor.full_name} · {formatDateLong(dateKey)}</p>
             <div className="mt-1 flex flex-wrap gap-2">
-              <button type="button" className="text-xs text-[#4ea895] hover:underline" onClick={() => setStep('doctor')}>← Change Doctor</button>
-              <button type="button" className="text-xs text-[#4ea895] hover:underline" onClick={() => setStep('date')}>← Change Date</button>
+              <button type="button" className="icon-button text-xs text-[#4ea895] hover:underline" onClick={() => setStep('doctor')}><AppIcon icon={ChevronLeft} size={16} />Change Doctor</button>
+              <button type="button" className="icon-button text-xs text-[#4ea895] hover:underline" onClick={() => setStep('date')}><AppIcon icon={ChevronLeft} size={16} />Change Date</button>
             </div>
           </div>
           <h3 id="choose-time" className="text-base font-semibold">Choose an Available Time</h3>
           <p className="text-sm text-slate-400">{formatDateLong(dateKey)}</p>
-          {slots.length === 0 ? (
+          {availability.loading || availability.error ? <QueryState query={availability} label="available times" /> : slots.length === 0 ? (
             <div className="dk-panel text-center">
               <h4 className="font-semibold">No Available Times</h4>
               <p className="mt-1 text-sm text-slate-400">There are no available appointment times for this date. Please choose another date.</p>
@@ -550,13 +392,16 @@ export default function BookAppointment() {
                 rows={2}
                 placeholder="Briefly describe your concern"
                 value={reason}
+                maxLength={2000}
+                readOnly={!!rescheduleId}
                 onChange={(e) => setReason(e.target.value)}
               />
+              {rescheduleId && <p className="text-xs text-slate-400">Rescheduling changes doctor/time. The original reason is preserved.</p>}
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="dk-btn-ghost" onClick={() => setStep('doctor')}>Change Doctor</button>
-              <button type="button" className="dk-btn-ghost" onClick={() => setStep('date')}>Change Date</button>
-              <button type="button" className="dk-btn-ghost" onClick={() => setStep('time')}>Change Time</button>
+              <button type="button" className="icon-button dk-btn-ghost" onClick={() => setStep('doctor')}><AppIcon icon={ChevronLeft} size={16} />Change Doctor</button>
+              <button type="button" className="icon-button dk-btn-ghost" onClick={() => setStep('date')}><AppIcon icon={Calendar} size={16} />Change Date</button>
+              <button type="button" className="icon-button dk-btn-ghost" onClick={() => setStep('time')}><AppIcon icon={Clock} size={16} />Change Time</button>
             </div>
             <button type="button" className="dk-btn-primary w-full py-2.5" disabled={busy} onClick={() => void confirmBooking()}>
               {busy ? 'Booking…' : rescheduleId ? 'Confirm Reschedule' : 'Confirm Appointment'}
@@ -567,7 +412,7 @@ export default function BookAppointment() {
 
       {step === 'success' && summary && (
         <section aria-labelledby="success" className="dk-panel mx-auto max-w-lg space-y-3 text-center">
-          <p className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-500/15 text-2xl text-green-400">✓</p>
+          <p className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-green-500/15 text-2xl text-green-400"><AppIcon icon={CircleCheck} size={24} /></p>
           <h2 id="success" className="text-xl font-bold">
             {rescheduleId ? 'Appointment Rescheduled!' : 'Appointment Booked Successfully!'}
           </h2>

@@ -1,0 +1,12 @@
+# Handlers validate identity themselves; gateway JWT rejection must not block OPTIONS.
+project_id = "medicappointment-local"
+
+[auth]
+minimum_password_length = 8
+
+[functions.send-confirmation]
+verify_jwt = false
+[functions.send-reminders]
+verify_jwt = false
+[functions.notification-status]
+verify_jwt = false

@@ -1,7 +1,13 @@
+import { Plus } from 'lucide-react';
+import AppIcon from '../../components/AppIcon';
+import { fetchAllRows } from '../../lib/fetchAllRows';
+import { addClinicDays } from '../../lib/clinicTime';
+import QueryState from '../../components/QueryState';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getStaffClient } from './auth/staffAuth';
-import { toLocalDateKey, dayRangeIso } from '../../lib/slots';
+import { clinicDateKey, clinicDayRange, clinicMonthRange, clinicWeekday, formatClinicDate, formatClinicTime } from '../../lib/clinicTime';
+import { useClinicQuery, useAppointmentRevision } from '../../lib/useClinicQuery';
 
 interface Row {
   id: string;
@@ -13,7 +19,7 @@ interface Row {
   doctor?: { full_name: string } | null;
 }
 
-const STATUSES = ['all', 'scheduled', 'checked_in', 'waiting', 'in_progress', 'completed', 'cancelled', 'no_show'];
+const STATUSES = ['all', 'pending', 'scheduled', 'checked_in', 'waiting', 'in_progress', 'completed', 'cancelled', 'no_show'];
 
 export function statusPill(status: string): string {
   switch (status) {
@@ -32,82 +38,57 @@ export function statusPill(status: string): string {
   }
 }
 
-function monthBounds(dateKey: string): { start: Date; end: Date; year: number; month: number } {
-  const [y, m] = dateKey.split('-').map(Number);
-  return { start: new Date(y, m - 1, 1), end: new Date(y, m, 0, 23, 59, 59), year: y, month: m - 1 };
-}
-
 export default function Dashboard() {
   const sb = getStaffClient();
-  const [dateKey, setDateKey] = useState(toLocalDateKey(new Date()));
-  const [rows, setRows] = useState<Row[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [dateKey, setDateKey] = useState(clinicDateKey());
+  const revision = useAppointmentRevision();
   const [statusFilter, setStatusFilter] = useState('all');
-  const [monthCounts, setMonthCounts] = useState<Record<string, number>>({});
-  const { start, end, year, month } = useMemo(() => monthBounds(dateKey), [dateKey]);
-
-  // Day list (shared dayRangeIso helper — same bounds as Check-in)
-  useEffect(() => {
-    const { startIso: s, endIso: e } = dayRangeIso(dateKey);
-    sb.from('appointments')
-      .select('id,scheduled_time,status,room,source,patient:patients(full_name),doctor:doctors(full_name)')
-      .gte('scheduled_time', s)
-      .lte('scheduled_time', e)
-      .order('scheduled_time')
-      .then(({ data }) => {
-        const list = (data as unknown as Row[]) ?? [];
-        setRows(list);
-        const c: Record<string, number> = {};
-        for (const r of list) c[r.status] = (c[r.status] ?? 0) + 1;
-        setCounts(c);
-      });
-  }, [dateKey, sb]);
-
-  // Month heat for the mini calendar (one range query, grouped client-side)
-  useEffect(() => {
-    sb.from('appointments')
-      .select('scheduled_time')
-      .gte('scheduled_time', start.toISOString())
-      .lte('scheduled_time', end.toISOString())
-      .limit(3000)
-      .then(({ data }) => {
-        const c: Record<string, number> = {};
-        for (const r of (data as { scheduled_time: string }[]) ?? []) {
-          const d = new Date(r.scheduled_time);
-          const key = toLocalDateKey(d);
-          c[key] = (c[key] ?? 0) + 1;
-        }
-        setMonthCounts(c);
-      });
-  }, [start, end, sb]);
+  const { startIso, nextStartIso, year, month, daysInMonth } = clinicMonthRange(dateKey);
+  const dayQuery = useClinicQuery<Row[]>(`day/${dateKey}/${revision}`, async (signal) => {
+    const range = clinicDayRange(dateKey);
+    return fetchAllRows<Row>(offset => sb.from('appointments')
+      .select('id,scheduled_time,status,room,source,patient:patients(full_name),doctor:doctors(full_name)', { count: 'exact' })
+      .gte('scheduled_time', range.startIso).lt('scheduled_time', range.nextStartIso).order('scheduled_time').order('id').range(offset, offset + 499).abortSignal(signal));
+  }, []);
+  const rows = dayQuery.data;
+  const counts = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const row of rows) out[row.status] = (out[row.status] ?? 0) + 1;
+    return out;
+  }, [rows]);
+  const monthQuery = useClinicQuery<Record<string, number>>(`month/${startIso}/${revision}`, async (signal) => {
+    const { data, error } = await sb.rpc('staff_appointment_report', { p_from: dateKey.slice(0, 7) + '-01', p_to: addClinicDays(dateKey.slice(0, 7) + '-01', daysInMonth - 1) }).abortSignal(signal);
+    if (error) throw new Error(error.message);
+    if (!data?.perDay) throw new Error('Calendar report is missing.');
+    return data.perDay as Record<string, number>;
+  }, {});
+  const monthCounts = monthQuery.data;
 
   const cells = useMemo(() => {
-    const firstDow = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDow = clinicWeekday(`${dateKey.slice(0, 7)}-01`);
     const out: (string | null)[] = [];
     for (let i = 0; i < firstDow; i++) out.push(null);
     for (let d = 1; d <= daysInMonth; d++) {
       out.push(`${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
     }
     return out;
-  }, [year, month]);
+  }, [year, month, daysInMonth]);
 
   const filtered = statusFilter === 'all' ? rows : rows.filter((r) => r.status === statusFilter);
-  const dayLabel = new Date(`${dateKey}T12:00:00`).toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
+  const dayLabel = formatClinicDate(dateKey, { weekday: 'long', month: 'long', day: 'numeric' });
 
+  if (dayQuery.loading || dayQuery.error) return <QueryState query={dayQuery} label="appointments" />;
+  if (monthQuery.loading || monthQuery.error) return <QueryState query={monthQuery} label="appointments" />;
   return (
     <div className="space-y-4">
+      {(dayQuery.error || monthQuery.error) && <p role="alert">{dayQuery.error || monthQuery.error}</p>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm text-slate-400">{dayLabel}</p>
           <h1 className="text-2xl font-bold">Daily overview</h1>
         </div>
-        <Link className="dk-btn-ghost" to="/appointments/booking">
-          + New appointment
+        <Link className="icon-button dk-btn-ghost" to="/appointments/booking">
+          <AppIcon icon={Plus} size={17} />New appointment
         </Link>
       </div>
 
@@ -134,7 +115,7 @@ export default function Dashboard() {
         <div className="dk-panel h-fit">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-300">
-              {new Date(year, month, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' })}
+              {formatClinicDate(`${dateKey.slice(0, 7)}-01`, { month: 'long', year: 'numeric' })}
             </h2>
             <input
               className="dk-input max-w-[130px] py-1 text-xs"
@@ -174,7 +155,7 @@ export default function Dashboard() {
             )}
           </div>
           <div className="mt-3 space-y-2 border-t border-white/5 pt-3">
-            <input className="dk-input" type="date" value={dateKey} onChange={(e) => setDateKey(e.target.value)} />
+            <input className="dk-input" type="date" value={dateKey} onChange={(e) => { if (e.target.value) setDateKey(e.target.value); }} />
             <select className="dk-input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -200,7 +181,7 @@ export default function Dashboard() {
                 {filtered.map((r) => (
                   <tr key={r.id}>
                     <td className="dk-td font-semibold tabular-nums">
-                      {new Date(r.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {formatClinicTime(r.scheduled_time)}
                     </td>
                     <td className="dk-td">
                       {r.patient?.full_name}

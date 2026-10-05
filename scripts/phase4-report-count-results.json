@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-10-03T11:03:51.791Z",
+  "result": "PASS",
+  "fixture": {
+    "total": 1211,
+    "noShows": 4,
+    "cancelled": 1201,
+    "walkIns": 3,
+    "perDoctorTotals": [
+      4,
+      1207
+    ],
+    "sameNameDoctorIds": 2,
+    "sameNameFlaggedPatientIds": 2,
+    "auditTotal": 185,
+    "auditPages": [
+      100,
+      85
+    ],
+    "allEightStatuses": true
+  },
+  "timezones": [
+    "Asia/Manila",
+    "UTC",
+    "America/New_York"
+  ],
+  "boundary": "Disposable local SQL, synthetic only; no REST row cap; no hosted access"
+}
