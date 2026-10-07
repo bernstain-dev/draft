@@ -18,7 +18,7 @@
 -- the old schema to this one without dropping existing data).
 --
 -- Design notes:
---  * No Board Queuing system: no queue_number, no priority lane,
+--  * No Board Queuing system: no queue_number, no priority lane, 
 --    no queue_today view, no get_queue_today/can_access_queue.
 --  * Roles: admin (manages everything) + patient (books own visits).
 --    Admin manages schedules; patients book ONLY their own visits.
@@ -1064,23 +1064,10 @@ do $$ declare t text; begin
   end loop;
 end $$;
 
--- Read-only authorization uses the statement snapshot, without actor row locks.
--- Protected mutations must continue using the Phase 1 _require_admin() guard.
-create or replace function public._require_admin_readonly()
-returns void language plpgsql stable security definer set search_path = '' as $$
-begin
-  if not exists (select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'admin') then
-    raise exception using errcode='42501',message='Administrator authorization required.';
-  end if;
-end $$;
--- Private helper: only the SECURITY DEFINER entry points invoke it.
-revoke all on function public._require_admin_readonly() from public,anon,authenticated;
-
 create or replace function public.admin_patient_duplicate_count(p_name text,p_dob date default null,p_contact text default null)
-returns bigint language plpgsql stable security definer set search_path = '' as $$
+returns bigint language plpgsql security definer set search_path = '' as $$
 declare n bigint; begin
-  perform public._require_admin_readonly();
+  perform public._require_admin();
   if not public._valid_clinic_text(p_name,300,true) or not public._valid_clinic_contact(nullif(btrim(p_contact),'')) then raise exception 'Invalid duplicate-search input.'; end if;
   select count(*) into n from public.patients p where lower(btrim(p.full_name))=lower(btrim(p_name))
     and ((p_dob is not null and p.date_of_birth=p_dob) or (nullif(btrim(p_contact),'') is not null
@@ -1267,7 +1254,7 @@ end $$;
 create or replace function public.staff_appointment_report(p_from date,p_to date,p_doctor_id uuid default null)
 returns jsonb language plpgsql stable security definer set search_path = '' as $$
 declare result jsonb; begin
-  perform public._require_admin_readonly();
+  perform public._require_admin();
   if p_from is null or p_to is null or not isfinite(p_from) or not isfinite(p_to) or p_to<p_from or p_to-p_from>365 then
     raise exception 'Choose a valid inclusive report range of at most 366 clinic days.'; end if;
   with visits as (
@@ -1296,7 +1283,7 @@ end $$;
 create or replace function public.staff_report_audit(p_from date,p_to date,p_action text default null,p_offset integer default 0,p_limit integer default 100)
 returns jsonb language plpgsql stable security definer set search_path = '' as $$
 declare result jsonb; begin
-  perform public._require_admin_readonly();
+  perform public._require_admin();
   if p_from is null or p_to is null or not isfinite(p_from) or not isfinite(p_to) or p_to<p_from or p_to-p_from>365
     or p_offset is null or p_offset<0 or p_limit is null or p_limit not between 1 and 100 then raise exception 'Invalid audit report range or page.'; end if;
   with logs as (select id,action,entity,created_at from public.audit_log
